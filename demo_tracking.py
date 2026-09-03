@@ -36,6 +36,16 @@ def main():
         use_picamera2=config.USE_PICAMERA2,
     )
 
+    if not camera.is_opened():
+        print(f"\n[ERROR] Could not open camera source '{cam_src}'.")
+        print("Troubleshooting options:")
+        print("  1. If using a USB webcam, try index 1 or 2: python3 demo_tracking.py --source 1")
+        print("  2. Check connected video devices: v4l2-ctl --list-devices or ls -l /dev/video*")
+        print("  3. If using RPi Camera Module ( ribbon ), set USE_PICAMERA2 = True in config.py")
+        print("  4. If testing with a video file: python3 demo_tracking.py --source /path/to/video.mp4\n")
+        camera.release()
+        return
+
     print("=== Vehicle Tracking Demo (RPi 5) ===")
     print("Press 'Q' to exit.")
 

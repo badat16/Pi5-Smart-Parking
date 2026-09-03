@@ -101,6 +101,12 @@ class CameraStream:
                 if not ret:
                     time.sleep(0.01)
 
+    def is_opened(self) -> bool:
+        """Check if camera stream is successfully initialized and opened."""
+        if self.use_picamera2:
+            return self.picam2 is not None and self.ret
+        return self.cap is not None and self.cap.isOpened()
+
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
         """Get the most recent frame."""
         with self.lock:

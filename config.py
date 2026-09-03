@@ -20,10 +20,10 @@ FACE_MODEL_NAME = "buffalo_sc"
 
 # Camera Settings
 # Set CAMERA_SOURCE to an integer (0, 1) for USB webcam, or a video path/RTSP string
-CAMERA_SOURCE = 0
+CAMERA_SOURCE = 1
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
-CAMERA_FPS = 30
+CAMERA_FPS = 20
 # Set to True if using the official Raspberry Pi Camera Module (v2, v3, HQ) with libcamera/Picamera2
 USE_PICAMERA2 = False
 

@@ -70,6 +70,16 @@ def main():
         use_picamera2=config.USE_PICAMERA2,
     )
 
+    if not camera.is_opened():
+        print(f"\n[ERROR] Could not open camera source '{config.CAMERA_SOURCE}'.")
+        print("Troubleshooting options:")
+        print("  1. Change CAMERA_SOURCE in config.py to 1 or 2")
+        print("  2. Check connected video devices: v4l2-ctl --list-devices or ls -l /dev/video*")
+        print("  3. If using RPi Camera Module (ribbon), set USE_PICAMERA2 = True in config.py\n")
+        camera.release()
+        db.close()
+        return
+
     status_msg = "Ready. Position face in front of camera."
     prev_time = time.time()
     fps = 0.0

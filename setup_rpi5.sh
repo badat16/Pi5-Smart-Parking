@@ -22,7 +22,7 @@ sudo apt install -y \
     libglib2.0-0 \
     libcap-dev \
     ffmpeg \
-    libatlas-base-dev \
+    libopenblas-dev \
     v4l-utils \
     libcamera-tools \
     git \

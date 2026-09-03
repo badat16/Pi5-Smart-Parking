@@ -59,6 +59,13 @@ class SmartParkingGate:
             use_picamera2=config.USE_PICAMERA2,
         )
 
+        if not self.camera.is_opened():
+            print(f"\n[ERROR] Could not open camera source '{config.CAMERA_SOURCE}'.")
+            print("Troubleshooting options:")
+            print("  1. Change CAMERA_SOURCE in config.py to 1 or 2 (for USB webcams)")
+            print("  2. Check connected devices: v4l2-ctl --list-devices or ls -l /dev/video*")
+            print("  3. If using RPi Camera Module (ribbon), set USE_PICAMERA2 = True in config.py\n")
+
         self.last_status_msg = "SYSTEM READY"
         self.last_status_color = (0, 255, 0)
         self.last_transaction_info = "No recent transactions"

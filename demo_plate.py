@@ -81,6 +81,16 @@ def main():
         use_picamera2=config.USE_PICAMERA2,
     )
 
+    if not camera.is_opened():
+        print(f"\n[ERROR] Could not open camera source '{cam_src}'.")
+        print("Troubleshooting options:")
+        print("  1. If using USB webcam, try index 1 or 2: python3 demo_plate.py --source 1")
+        print("  2. Check connected video devices: v4l2-ctl --list-devices or ls -l /dev/video*")
+        print("  3. If using RPi Camera Module (ribbon), set USE_PICAMERA2 = True in config.py")
+        print("  4. Test a static image: python3 demo_plate.py --image test_images/1.jpg\n")
+        camera.release()
+        return
+
     print("=== ALPR Live Stream (RPi 5) ===")
     print("Press 'Q' to exit.")
 
