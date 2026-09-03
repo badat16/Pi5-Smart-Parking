@@ -3,7 +3,7 @@ Vehicle Detection and Lightweight Multi-Object Tracker for Raspberry Pi 5.
 Powered by Ultralytics YOLOv8 & centroid-velocity tracking.
 """
 
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -139,6 +139,10 @@ class LightweightTracker:
         return self.tracks
 
 
+import os
+import config
+
+
 class VehicleTracker:
     def __init__(
         self,
@@ -147,16 +151,156 @@ class VehicleTracker:
         iou_thresh: float = 0.60,
         track_score: float = 0.20,
         max_missed: int = 35,
+        imgsz: int = 320,
+        enable_roi: bool = None,
+        roi_polygons: List[List[Tuple[int, int]]] = None,
     ):
         self.conf_thresh = conf_thresh
         self.iou_thresh = iou_thresh
-        self.model = YOLO(str(model_path))
+        self.imgsz = imgsz
+
+        # Crossing Line Settings (Vạch cắt ngang)
+        self.enable_crossing_line = getattr(config, "ENABLE_CROSSING_LINE_FILTER", True)
+        self.crossing_line_y = getattr(config, "CROSSING_LINE_Y", 295)
+        self.crossing_line_color = getattr(config, "CROSSING_LINE_COLOR", (0, 255, 255))
+
+        # ROI & Parking Zones (4 Khu: A, B, C, D | 12 Ô đậu: A1..D3)
+        self.enable_roi_filter = getattr(config, "ENABLE_ROI_FILTER", True) if enable_roi is None else enable_roi
+        self.roi_filter_type = getattr(config, "ROI_FILTER_TYPE", "centroid")
+        raw_polys = getattr(config, "PARKING_ROI_POLYGONS", []) if roi_polygons is None else roi_polygons
+        self.roi_polygons = [np.array(poly, dtype=np.int32) for poly in raw_polys]
+
+        # Load Parking Zones & 12 Slots configuration
+        self.zones_config = getattr(config, "PARKING_ZONES", {})
+        self.parsed_slots = {}
+        for zone_id, zone_info in self.zones_config.items():
+            z_name = zone_info.get("name", f"Khu {zone_id}")
+            for slot_id, pts in zone_info.get("slots", {}).items():
+                self.parsed_slots[slot_id] = {
+                    "zone_id": zone_id,
+                    "zone_name": z_name,
+                    "poly": np.array(pts, dtype=np.int32),
+                }
+
+        # Prefer ONNX format for maximum CPU speed on Raspberry Pi 5
+        onnx_path = str(model_path).rsplit(".", 1)[0] + ".onnx"
+        if os.path.exists(onnx_path):
+            self.model = YOLO(onnx_path, task="detect")
+            print(f"[VehicleTracker] Loaded optimized ONNX model: {onnx_path}")
+        else:
+            self.model = YOLO(str(model_path))
+            print(f"[VehicleTracker] Loaded PyTorch model: {model_path} (imgsz={imgsz})")
+
         self.tracker = LightweightTracker(iou_threshold=track_score, max_missed=max_missed)
         self.names = self.model.names if hasattr(self.model, "names") else {}
 
+        # Dynamic bounds cache for resolution scaling
+        self.scaled_slots = {}
+        self.scaled_crossing_y = self.crossing_line_y
+        self.min_x = 5
+        self.max_x = 635
+        self.max_y = 475
+        self.last_frame_shape = (0, 0)
+
+    def _update_bounds_for_frame(self, frame_h: int, frame_w: int):
+        """Dynamically scale 640x480 configured slots and crossing line to match actual frame resolution."""
+        if self.last_frame_shape == (frame_h, frame_w) and self.scaled_slots:
+            return
+
+        self.last_frame_shape = (frame_h, frame_w)
+        s_x = frame_w / 640.0
+        s_y = frame_h / 480.0
+
+        self.scaled_crossing_y = int(self.crossing_line_y * s_y)
+
+        all_pts = []
+        self.scaled_slots = {}
+        for slot_id, slot_data in self.parsed_slots.items():
+            raw_poly = slot_data["poly"]
+            scaled_poly = np.column_stack((raw_poly[:, 0] * s_x, raw_poly[:, 1] * s_y)).astype(np.int32)
+            self.scaled_slots[slot_id] = {
+                "zone_id": slot_data["zone_id"],
+                "zone_name": slot_data["zone_name"],
+                "poly": scaled_poly,
+            }
+            all_pts.extend(scaled_poly.tolist())
+
+        if all_pts:
+            pts_arr = np.array(all_pts)
+            self.min_x = int(np.min(pts_arr[:, 0]))
+            self.max_x = int(np.max(pts_arr[:, 0]))
+            self.max_y = int(np.max(pts_arr[:, 1]))
+        else:
+            self.min_x = int(5 * s_x)
+            self.max_x = int(635 * s_x)
+            self.max_y = int(475 * s_y)
+
+    def has_crossed_line(self, box: Tuple[int, int, int, int]) -> bool:
+        """Check if vehicle box has crossed into the parking lot below the horizontal tracking line."""
+        if not self.enable_crossing_line:
+            return True
+        x1, y1, x2, y2 = box
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        return cy >= self.scaled_crossing_y or y2 >= self.scaled_crossing_y
+
+    def is_inside_roi(self, box: Tuple[int, int, int, int]) -> bool:
+        """Check if vehicle centroid is strictly inside the rectangular ROI tracking box."""
+        x1, y1, x2, y2 = box
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+        # Strict check: centroid (cx, cy) MUST be strictly inside [min_x..max_x, scaled_crossing_y..max_y]
+        in_horizontal = self.min_x <= cx <= self.max_x
+        in_vertical = self.scaled_crossing_y <= cy <= self.max_y
+        return in_horizontal and in_vertical
+
+    def detect_vehicle_slot(self, box: Tuple[int, int, int, int]) -> Tuple[Optional[str], Optional[str]]:
+        """Identify which Zone (A, B, C, D) and Slot (A1..D3) a vehicle is occupying."""
+        x1, y1, x2, y2 = box
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+        slots_to_check = self.scaled_slots if self.scaled_slots else self.parsed_slots
+
+        for slot_id, slot_data in slots_to_check.items():
+            poly = slot_data["poly"]
+            dist = cv2.pointPolygonTest(poly, (float(cx), float(cy)), False)
+            if dist >= 0:
+                return slot_id, slot_data["zone_name"]
+
+        return None, None
+
+    def get_slot_occupancy(self, tracks: List[SimpleTrack]) -> Dict[str, Dict[str, Any]]:
+        """Get current occupancy status of all 12 parking slots."""
+        occupancy = {}
+        for slot_id, slot_data in self.parsed_slots.items():
+            occupancy[slot_id] = {
+                "zone_id": slot_data["zone_id"],
+                "zone_name": slot_data["zone_name"],
+                "occupied": False,
+                "vehicle_id": None,
+                "confidence": 0.0,
+            }
+
+        for track in tracks:
+            display_box = track.box if track.missed == 0 else track.predicted_box()
+            slot_id, zone_name = self.detect_vehicle_slot(display_box)
+            if slot_id and slot_id in occupancy:
+                occupancy[slot_id]["occupied"] = True
+                occupancy[slot_id]["vehicle_id"] = track.track_id
+                occupancy[slot_id]["confidence"] = track.conf
+                track.assigned_slot = slot_id
+                track.assigned_zone = zone_name
+            else:
+                track.assigned_slot = None
+                track.assigned_zone = None
+
+        return occupancy
+
     def track(self, frame: np.ndarray) -> List[SimpleTrack]:
-        """Detect and update tracks for frame."""
-        results = self.model(frame, conf=self.conf_thresh, iou=self.iou_thresh, verbose=False)
+        """Detect and update tracks for vehicles that crossed line and are in ROI."""
+        h, w = frame.shape[:2]
+        self._update_bounds_for_frame(h, w)
+
+        results = self.model(frame, conf=self.conf_thresh, iou=self.iou_thresh, imgsz=self.imgsz, verbose=False)
         detections = []
 
         for result in results:
@@ -168,29 +312,145 @@ class VehicleTracker:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 class_id = int(box.cls[0])
                 conf = float(box.conf[0])
-                detections.append(((x1, y1, x2, y2), class_id, conf))
+                box_tuple = (x1, y1, x2, y2)
 
-        return self.tracker.update(detections)
+                # Track only if vehicle has crossed horizontal line and is inside active zone
+                if self.is_inside_roi(box_tuple):
+                    detections.append((box_tuple, class_id, conf))
+
+        tracks = self.tracker.update(detections)
+        self.get_slot_occupancy(tracks)
+        return tracks
+
+    def draw_crossing_line(self, frame: np.ndarray) -> np.ndarray:
+        """Draw horizontal tracking line and active tracking zone boundary box."""
+        if not self.enable_crossing_line:
+            return frame
+
+        h, w = frame.shape[:2]
+        self._update_bounds_for_frame(h, w)
+
+        y_pos = self.scaled_crossing_y
+
+        # 1. Horizontal Crossing Line
+        cv2.line(frame, (10, y_pos), (w - 10, y_pos), self.crossing_line_color, 2, cv2.LINE_AA)
+
+        # 2. Outer Boundary Frame matching EXACT slot boundaries!
+        cv2.rectangle(frame, (self.min_x, y_pos), (self.max_x, self.max_y), (0, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            "VUNG TRACKING XE (ACTIVE ZONE)",
+            (self.min_x + 8, y_pos + 18),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        return frame
+
+    def draw_parking_zones(self, frame: np.ndarray, occupancy: Dict[str, Dict[str, Any]]) -> np.ndarray:
+        """Draw 4 Zones (A, B, C, D) & 12 Slots (A1..D3) overlay with vacancy color coding."""
+        if not getattr(config, "SHOW_ROI_BOUNDARY", True) or not self.parsed_slots:
+            return frame
+
+        h, w = frame.shape[:2]
+        self._update_bounds_for_frame(h, w)
+
+        overlay = frame.copy()
+        vacant_color = getattr(config, "SLOT_VACANT_COLOR", (0, 255, 0))
+        occupied_color = getattr(config, "SLOT_OCCUPIED_COLOR", (0, 0, 255))
+        fill_alpha = getattr(config, "ROI_FILL_ALPHA", 0.20)
+
+        slots_to_draw = self.scaled_slots if self.scaled_slots else self.parsed_slots
+
+        for slot_id, slot_info in occupancy.items():
+            poly = slots_to_draw[slot_id]["poly"]
+            is_occupied = slot_info["occupied"]
+            color = occupied_color if is_occupied else vacant_color
+
+            if fill_alpha > 0.0:
+                cv2.fillPoly(overlay, [poly], color)
+            cv2.polylines(frame, [poly], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
+
+            cx, cy = int(np.mean(poly[:, 0])), int(np.mean(poly[:, 1]))
+            label = f"{slot_id}"
+            if is_occupied:
+                label += f" [Car #{slot_info['vehicle_id']}]"
+
+            cv2.putText(
+                frame,
+                label,
+                (cx - 18, cy + 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45 if not is_occupied else 0.40,
+                (255, 255, 255) if is_occupied else color,
+                2 if is_occupied else 1,
+                cv2.LINE_AA,
+            )
+
+        # Draw Zone Headers (Zone A, B, C, D) positioned accurately
+        s_x, s_y = w / 640.0, h / 480.0
+        zone_header_pts = {
+            "A": (int(100 * s_x), int(130 * s_y)),  # Khu A (Top-Left under green patch)
+            "B": (int(470 * s_x), int(130 * s_y)),  # Khu B (Top-Right under green patch)
+            "C": (int(100 * s_x), int(350 * s_y)),  # Khu C (Bottom-Left above zone C)
+            "D": (int(470 * s_x), int(350 * s_y)),  # Khu D (Bottom-Right above zone D)
+        }
+        for z_code, pt in zone_header_pts.items():
+            cv2.putText(
+                frame,
+                f"KHU {z_code}",
+                pt,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+        if fill_alpha > 0.0:
+            cv2.addWeighted(overlay, fill_alpha, frame, 1.0 - fill_alpha, 0, frame)
+        return frame
 
     def draw_tracks(self, frame: np.ndarray, tracks: List[SimpleTrack]) -> np.ndarray:
-        """Draw tracked vehicles bounding boxes and trajectory centroid."""
+        """Draw crossing line, 4-Zone 12-Slot overlay, and tracked vehicle boxes."""
+        # 1. Draw horizontal tracking crossing line
+        self.draw_crossing_line(frame)
+
+        # 2. Compute slot occupancy & render 12 parking spots
+        occupancy = self.get_slot_occupancy(tracks)
+        self.draw_parking_zones(frame, occupancy)
+
+        # 3. Render vehicle bounding boxes with concise label: Car <id> <Khu> <conf>
         for track in tracks:
             display_box = track.box if track.missed == 0 else track.predicted_box()
             x1, y1, x2, y2 = map(int, display_box)
-            label_name = self.names.get(track.class_id, f"car_{track.class_id}") if isinstance(self.names, dict) else str(track.class_id)
 
             color = (0, 255, 0) if track.missed == 0 else (0, 180, 255)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+            if getattr(track, "assigned_slot", None) and track.assigned_slot in self.parsed_slots:
+                display_label = f"Car {track.track_id} {track.assigned_slot} {track.conf:.2f}"
+            else:
+                display_label = f"Car {track.track_id} {track.conf:.2f}"
+
+            # Draw background text box for readability
+            text_size = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 1)[0]
+            cv2.rectangle(frame, (x1, max(0, y1 - text_size[1] - 8)), (x1 + text_size[0] + 6, y1), (0, 0, 0), -1)
             cv2.putText(
                 frame,
-                f"{label_name} #{track.track_id} ({track.conf:.2f})",
-                (x1, max(20, y1 - 8)),
+                display_label,
+                (x1 + 3, max(15, y1 - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.60,
-                color,
-                2,
+                0.50,
+                (0, 255, 255) if getattr(track, "assigned_slot", None) else color,
+                1,
                 cv2.LINE_AA,
             )
             cx, cy = centroid(display_box)
             cv2.circle(frame, (int(cx), int(cy)), 4, color, -1)
+
         return frame
+
+

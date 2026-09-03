@@ -58,12 +58,19 @@ class CameraStream:
             if isinstance(src, str) and src.isdigit():
                 src = int(src)
 
-            # Try V4L2 backend on Linux/Raspberry Pi
-            try:
+            # Open video capture with V4L2 / MJPG optimization
+            if isinstance(src, int):
                 self.cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
                 if not self.cap.isOpened():
                     self.cap = cv2.VideoCapture(src)
-            except Exception:
+
+                # Fallback to index 0 if specified index (e.g. 1) cannot be opened or times out
+                if not self.cap.isOpened() and src != 0:
+                    print(f"[CameraStream] Index {src} failed/timed out. Auto-falling back to camera index 0...")
+                    self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+                    if not self.cap.isOpened():
+                        self.cap = cv2.VideoCapture(0)
+            else:
                 self.cap = cv2.VideoCapture(src)
 
             if not self.cap.isOpened():
@@ -71,10 +78,27 @@ class CameraStream:
                 self.ret = False
                 return
 
+            # Set MJPG codec & buffer size = 1 to prevent V4L2 select() timeout on Linux
+            try:
+                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            except Exception:
+                pass
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+
+            # Test frame read to verify capture node is active
             self.ret, self.frame = self.cap.read()
+            if not self.ret and isinstance(src, int) and src != 0:
+                print(f"[CameraStream] Video index {src} timeout reading frame. Switching to index 0...")
+                self.cap.release()
+                self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                self.ret, self.frame = self.cap.read()
 
         # Start background capture thread for real-time fresh frames
         self.thread = threading.Thread(target=self._update_loop, daemon=True)

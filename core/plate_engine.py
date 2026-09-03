@@ -12,23 +12,31 @@ import cv2
 import numpy as np
 import torch
 
+import config
 from .utils_rotate import deskew
 
 
 class PlateEngine:
     def __init__(
         self,
-        detector_path: str,
-        ocr_path: str,
-        yolov5_dir: str,
-        det_conf: float = 0.50,
-        ocr_conf: float = 0.55,
-        img_size: int = 640,
+        detector_path: Optional[str] = None,
+        ocr_path: Optional[str] = None,
+        yolov5_dir: Optional[str] = None,
+        det_conf: Optional[float] = None,
+        ocr_conf: Optional[float] = None,
+        img_size: Optional[int] = None,
         device: str = "cpu",
     ):
-        self.det_conf = det_conf
-        self.ocr_conf = ocr_conf
-        self.img_size = img_size
+        if detector_path is None:
+            detector_path = str(config.PLATE_DETECTOR_MODEL)
+        if ocr_path is None:
+            ocr_path = str(config.PLATE_OCR_MODEL)
+        if yolov5_dir is None:
+            yolov5_dir = str(config.YOLOV5_DIR)
+
+        self.det_conf = det_conf if det_conf is not None else getattr(config, "PLATE_DET_CONF", 0.25)
+        self.ocr_conf = ocr_conf if ocr_conf is not None else getattr(config, "PLATE_OCR_CONF", 0.25)
+        self.img_size = img_size if img_size is not None else getattr(config, "PLATE_IMG_SIZE", 640)
         self.device = device
 
         detector_path = str(Path(detector_path).resolve())
@@ -86,7 +94,7 @@ class PlateEngine:
         results = self.ocr(plate_crop)
         bb_list = results.pandas().xyxy[0].values.tolist()
 
-        if len(bb_list) < 6 or len(bb_list) > 12:
+        if len(bb_list) < 2 or len(bb_list) > 14:
             return "unknown"
 
         center_list = []
@@ -123,7 +131,8 @@ class PlateEngine:
             plate_text = ""
             for l1 in sorted(line_1, key=lambda x: x[0]):
                 plate_text += str(l1[2])
-            plate_text += "-"
+            if line_1 and line_2:
+                plate_text += "-"
             for l2 in sorted(line_2, key=lambda x: x[0]):
                 plate_text += str(l2[2])
         else:
@@ -135,13 +144,22 @@ class PlateEngine:
 
     def recognize_crop(self, crop_img: np.ndarray) -> str:
         """Deskew and OCR plate image directly in memory with multiple angle tests."""
+        # 1. Try direct OCR first
+        raw_text = self._read_characters(crop_img)
+        if raw_text != "unknown" and len(raw_text) >= 2:
+            return raw_text
+
+        # 2. Try deskewing tests
         for change_cons in (0, 1):
             for center_thres in (0, 1):
-                rotated = deskew(crop_img, change_cons=change_cons, center_thres=center_thres)
-                text = self._read_characters(rotated)
-                if text != "unknown" and len(text) >= 6:
-                    return text
-        return "unknown"
+                try:
+                    rotated = deskew(crop_img, change_cons=change_cons, center_thres=center_thres)
+                    text = self._read_characters(rotated)
+                    if text != "unknown" and len(text) >= 2:
+                        return text
+                except Exception:
+                    pass
+        return raw_text if raw_text != "unknown" else "unknown"
 
     def detect_and_read(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """
