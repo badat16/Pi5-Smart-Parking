@@ -413,7 +413,12 @@ class VehicleTracker:
             cv2.addWeighted(overlay, fill_alpha, frame, 1.0 - fill_alpha, 0, frame)
         return frame
 
-    def draw_tracks(self, frame: np.ndarray, tracks: List[SimpleTrack]) -> np.ndarray:
+    def draw_tracks(
+        self,
+        frame: np.ndarray,
+        tracks: List[SimpleTrack],
+        session_map: Optional[Dict[int, Dict[str, Any]]] = None,
+    ) -> np.ndarray:
         """Draw crossing line, 4-Zone 12-Slot overlay, and tracked vehicle boxes."""
         # 1. Draw horizontal tracking crossing line
         self.draw_crossing_line(frame)
@@ -422,7 +427,7 @@ class VehicleTracker:
         occupancy = self.get_slot_occupancy(tracks)
         self.draw_parking_zones(frame, occupancy)
 
-        # 3. Render vehicle bounding boxes with concise label: Car <id> <Khu> <conf>
+        # 3. Render vehicle bounding boxes with concise label: Car <id> [<plate>] <Khu> <conf>
         for track in tracks:
             display_box = track.box if track.missed == 0 else track.predicted_box()
             x1, y1, x2, y2 = map(int, display_box)
@@ -430,10 +435,16 @@ class VehicleTracker:
             color = (0, 255, 0) if track.missed == 0 else (0, 180, 255)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
+            plate_info = ""
+            if session_map and track.track_id in session_map:
+                plate_str = session_map[track.track_id].get("plate", "")
+                if plate_str and plate_str != "UNKNOWN":
+                    plate_info = f" [{plate_str}]"
+
             if getattr(track, "assigned_slot", None) and track.assigned_slot in self.parsed_slots:
-                display_label = f"Car {track.track_id} {track.assigned_slot} {track.conf:.2f}"
+                display_label = f"Car {track.track_id}{plate_info} {track.assigned_slot}"
             else:
-                display_label = f"Car {track.track_id} {track.conf:.2f}"
+                display_label = f"Car {track.track_id}{plate_info} {track.conf:.2f}"
 
             # Draw background text box for readability
             text_size = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 1)[0]

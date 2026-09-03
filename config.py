@@ -21,9 +21,13 @@ FACE_MODEL_NAME = "buffalo_sc"
 # Camera Settings
 # Set CAMERA_SOURCE to an integer (0, 1) for USB webcam, or a video path/RTSP string
 CAMERA_SOURCE = 0
+TRACKING_CAMERA_SOURCE = 0  # Overhead camera for vehicle & slot tracking
+GATE_CAMERA_SOURCE = 1      # Entry/Exit gate camera for face & license plate recognition
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
-CAMERA_FPS = 20
+TRACKING_CAMERA_FPS = 30
+GATE_CAMERA_FPS = 10        # Throttled to 10 FPS to save CPU resources for tracking
+CAMERA_FPS = 30
 # Set to True if using the official Raspberry Pi Camera Module (v2, v3, HQ) with libcamera/Picamera2
 USE_PICAMERA2 = False
 
