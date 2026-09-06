@@ -22,11 +22,11 @@ FACE_MODEL_NAME = "buffalo_sc"
 # Set CAMERA_SOURCE to an integer (0, 1) for USB webcam, or a video path/RTSP string
 CAMERA_SOURCE = 0
 TRACKING_CAMERA_SOURCE = 0  # Overhead camera for vehicle & slot tracking
-GATE_CAMERA_SOURCE = 1      # Entry/Exit gate camera for face & license plate recognition
+GATE_CAMERA_SOURCE = 2      # Entry/Exit gate camera for face & license plate recognition
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 TRACKING_CAMERA_FPS = 30
-GATE_CAMERA_FPS = 10        # Throttled to 10 FPS to save CPU resources for tracking
+GATE_CAMERA_FPS = 20        # Throttled to 10 FPS to save CPU resources for tracking
 CAMERA_FPS = 30
 # Set to True if using the official Raspberry Pi Camera Module (v2, v3, HQ) with libcamera/Picamera2
 USE_PICAMERA2 = False
@@ -38,11 +38,11 @@ FACE_DET_SIZE = (320, 320)   # Optimal detection resolution for Cortex-A76 CPU
 FACE_MIN_SIZE = 45           # Minimum width/height in pixels to reject blurry distant faces
 
 # License Plate Recognition Settings (ALPR)
-PLATE_DET_CONF = 0.25   # Lowered threshold to detect plates reliably on webcams/Pi
-PLATE_OCR_CONF = 0.25   # Lowered OCR threshold to read all plate characters
-PLATE_IMG_SIZE = 640
-ALPR_CAPTURE_WIDTH = 1920
-ALPR_CAPTURE_HEIGHT = 1080
+PLATE_DET_CONF = 0.3  # Lowered threshold to detect plates reliably on webcams/Pi
+PLATE_OCR_CONF = 0.5  # Lowered OCR threshold to read all plate characters
+PLATE_IMG_SIZE = 1280
+ALPR_CAPTURE_WIDTH = 1280
+ALPR_CAPTURE_HEIGHT = 720
 
 # Entry & Exit Gate Boxes (2 ô ra vào ở phía trên giữa 2 ô màu xanh): [x1, y1, x2, y2] relative to 640x480
 ENTRY_LANE_BOX = [241, 42, 322, 117]   # Ô Vào (↓ - Phía trái): Lật 180° khi chụp ALPR

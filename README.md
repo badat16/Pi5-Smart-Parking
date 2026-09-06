@@ -10,7 +10,7 @@
 ## 📌 Giới thiệu & Điểm Tối Ưu Cho Raspberry Pi 5
 
 Phiên bản này được thiết kế và tối ưu riêng cho **Raspberry Pi 5**, tích hợp trọn vẹn 3 phân hệ cốt lõi:
-1. 🔍 **Nhận diện Biển số xe (ALPR)**: Phát hiện vùng biển số (YOLOv5 Nano) + Thuật toán Deskew xoay phẳng + Nhận diện ký tự OCR (YOLOv5 Nano OCR). Toàn bộ ảnh crop và xoay được xử lý trực tiếp trên RAM, không ghi liên tục vào thẻ nhớ MicroSD để tránh nghẽn I/O và bảo vệ tuổi thọ thẻ nhớ.
+1. 🔍 **Nhận diện Biển số xe (ALPR)**: Phát hiện vùng biển số (YOLOv5 Nano) + Engine OCR siêu tốc dựa trên **`fast-plate-ocr` (ONNX Runtime)** cho phép trích xuất ký tự biển số tức thì với độ chính xác cao và mức tiêu thụ tài nguyên CPU cực thấp trên Pi 5. Tự động fallback về thuật toán Deskew RAM + YOLOv5 OCR nếu cần.
 2. 👤 **Nhận diện Khuôn mặt Tài xế (Face Recognition)**: InsightFace `buffalo_sc` chạy trên nền **ONNX Runtime CPU** tận dụng tối đa 4 nhân Cortex-A76 của Pi 5 để trích xuất 512-d embedding và tính Cosine Similarity tức thì.
 3. 🚗 **Phát hiện & Theo dõi xe (Vehicle Tracking)**: YOLOv8 Nano + Bộ theo dõi đối tượng nhẹ (Lightweight Centroid/Velocity Tracker).
 4. 🏗️ **Quản lý Cổng Tích Hợp (Smart Gate In/Out)**:
@@ -231,3 +231,15 @@ smart_parking_rpi5/
   vcgencmd measure_temp
   ```
 - Với quạt Active Cooler, nhiệt độ khi suy luận AI liên tục trên Pi 5 sẽ duy trì ổn định ở mức 45°C - 58°C.
+
+---
+
+## 🙏 Tri Ân & Tín Nhiệm Mã Nguồn Mở (Credits & Acknowledgments)
+
+Dự án này sử dụng và chân thành cảm ơn tác giả cũng như các cộng đồng mã nguồn mở sau:
+
+- 📖 **[fast-plate-ocr](https://github.com/pysolotravel/fast-plate-ocr)** bởi **[pysolotravel](https://github.com/pysolotravel)**: Thư viện OCR biển số xe tối ưu trên nền ONNX Runtime cho tốc độ nhận diện tức thì và độ chính xác cực cao.
+- 👁️ **[InsightFace](https://github.com/deepinsight/insightface)**: Thư viện phân tích và nhận diện khuôn mặt hàng đầu.
+- ⚡ **[YOLOv5](https://github.com/ultralytics/yolov5)** & **[YOLOv8](https://github.com/ultralytics/ultralytics)** bởi Ultralytics: Mô hình phát hiện đối tượng thời gian thực.
+- 📦 **[ONNX Runtime](https://onnxruntime.ai/)** bởi Microsoft: Inference engine tối ưu hóa đa luồng trên CPU ARM Cortex-A76.
+

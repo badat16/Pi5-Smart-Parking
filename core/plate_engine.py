@@ -15,6 +15,12 @@ import torch
 import config
 from .utils_rotate import deskew
 
+try:
+    from fast_plate_ocr import LicensePlateRecognizer
+    HAS_FAST_OCR = True
+except ImportError:
+    HAS_FAST_OCR = False
+
 
 class PlateEngine:
     def __init__(
@@ -45,12 +51,10 @@ class PlateEngine:
 
         if not os.path.exists(detector_path):
             raise FileNotFoundError(f"Detector weight not found: {detector_path}")
-        if not os.path.exists(ocr_path):
-            raise FileNotFoundError(f"OCR weight not found: {ocr_path}")
 
-        print(f"[PlateEngine] Loading YOLOv5 models on {device}...")
+        print(f"[PlateEngine] Loading YOLOv5 detector model on {device}...")
         
-        # Load local YOLOv5 models without internet/hub update
+        # Load local YOLOv5 detector model without internet/hub update
         self.detector = torch.hub.load(
             yolov5_dir,
             "custom",
@@ -61,16 +65,37 @@ class PlateEngine:
         )
         self.detector.conf = self.det_conf
 
-        self.ocr = torch.hub.load(
-            yolov5_dir,
-            "custom",
-            path=ocr_path,
-            source="local",
-            force_reload=False,
-            device=device,
-        )
-        self.ocr.conf = self.ocr_conf
-        print("[PlateEngine] Plate models loaded successfully.")
+        # Initialize fast-plate-ocr ONNX engine if installed
+        self.fast_ocr = None
+        if HAS_FAST_OCR:
+            try:
+                ocr_model_name = getattr(config, "FAST_OCR_MODEL", "cct-xs-v2-global-model")
+                print(f"[PlateEngine] Initializing fast-plate-ocr ONNX engine ({ocr_model_name})...")
+                self.fast_ocr = LicensePlateRecognizer(
+                    hub_ocr_model=ocr_model_name,
+                    device="auto" if device != "cpu" else "cpu",
+                )
+                print("[PlateEngine] Fast-plate-ocr ONNX engine loaded successfully.")
+            except Exception as e:
+                print(f"[PlateEngine] fast-plate-ocr init error: {e}. Will fallback to legacy YOLOv5 OCR.")
+
+        # Fallback YOLOv5 OCR model
+        self.ocr = None
+        if os.path.exists(ocr_path):
+            try:
+                self.ocr = torch.hub.load(
+                    yolov5_dir,
+                    "custom",
+                    path=ocr_path,
+                    source="local",
+                    force_reload=False,
+                    device=device,
+                )
+                self.ocr.conf = self.ocr_conf
+            except Exception as e:
+                print(f"[PlateEngine] Legacy YOLOv5 OCR load failed: {e}")
+
+        print("[PlateEngine] Plate Engine initialized.")
 
     @staticmethod
     def _linear_equation(x1: float, y1: float, x2: float, y2: float) -> Tuple[float, float]:
@@ -88,7 +113,7 @@ class PlateEngine:
 
     def _read_characters(self, plate_crop: np.ndarray) -> str:
         """Run OCR on cropped plate and format 1-line or 2-line Vietnamese plate text."""
-        if plate_crop is None or plate_crop.size == 0 or plate_crop.shape[0] < 10 or plate_crop.shape[1] < 10:
+        if self.ocr is None or plate_crop is None or plate_crop.size == 0 or plate_crop.shape[0] < 10 or plate_crop.shape[1] < 10:
             return "unknown"
 
         results = self.ocr(plate_crop)
@@ -143,23 +168,38 @@ class PlateEngine:
         return plate_text.strip()
 
     def recognize_crop(self, crop_img: np.ndarray) -> str:
-        """Deskew and OCR plate image directly in memory with multiple angle tests."""
-        # 1. Try direct OCR first
-        raw_text = self._read_characters(crop_img)
-        if raw_text != "unknown" and len(raw_text) >= 2:
-            return raw_text
+        """Deskew and OCR plate image directly in memory using fast ONNX engine or YOLOv5 fallback."""
+        if crop_img is None or crop_img.size == 0 or crop_img.shape[0] < 10 or crop_img.shape[1] < 10:
+            return "unknown"
 
-        # 2. Try deskewing tests
-        for change_cons in (0, 1):
-            for center_thres in (0, 1):
-                try:
-                    rotated = deskew(crop_img, change_cons=change_cons, center_thres=center_thres)
-                    text = self._read_characters(rotated)
-                    if text != "unknown" and len(text) >= 2:
-                        return text
-                except Exception:
-                    pass
-        return raw_text if raw_text != "unknown" else "unknown"
+        # 1. Try fast-plate-ocr ONNX first
+        if self.fast_ocr is not None:
+            try:
+                pred = self.fast_ocr.run_one(crop_img, return_confidence=True)
+                if pred and pred.plate and len(pred.plate) >= 2:
+                    return pred.plate
+            except Exception:
+                pass
+
+        # 2. Try legacy YOLOv5 OCR direct
+        if self.ocr is not None:
+            raw_text = self._read_characters(crop_img)
+            if raw_text != "unknown" and len(raw_text) >= 2:
+                return raw_text
+
+            # 3. Try deskewing tests with legacy OCR
+            for change_cons in (0, 1):
+                for center_thres in (0, 1):
+                    try:
+                        rotated = deskew(crop_img, change_cons=change_cons, center_thres=center_thres)
+                        text = self._read_characters(rotated)
+                        if text != "unknown" and len(text) >= 2:
+                            return text
+                    except Exception:
+                        pass
+            return raw_text if raw_text != "unknown" else "unknown"
+
+        return "unknown"
 
     def detect_and_read(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """
