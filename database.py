@@ -144,6 +144,7 @@ class ParkingDatabase:
                     "id": row["id"],
                     "person_name": row["person_name"],
                     "plate": row["plate"],
+                    "embedding": saved,
                     "time_in": row["time_in"],
                     "score": score,
                 }

@@ -1,6 +1,6 @@
 """
-Demo: License Plate Recognition (ALPR) on Raspberry Pi 5.
-Supports live camera feed or single test image.
+Demo: Basic Camera License Plate Recognition (ALPR) on Raspberry Pi 5.
+Tests basic license plate detection and OCR capability from camera stream or static image.
 """
 
 import argparse
@@ -15,11 +15,12 @@ from core.camera_stream import CameraStream
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ALPR Demo for Raspberry Pi 5")
+    parser = argparse.ArgumentParser(description="Basic ALPR Camera Demo for Raspberry Pi 5")
     parser.add_argument("-i", "--image", type=str, default="", help="Path to single image file for testing")
     parser.add_argument("-s", "--source", default="", help="Camera index (0, 1) or video path")
     args = parser.parse_args()
 
+    print("[INFO] Initializing Plate Engine...")
     engine = PlateEngine(
         detector_path=str(config.PLATE_DETECTOR_MODEL),
         ocr_path=str(config.PLATE_OCR_MODEL),
@@ -64,79 +65,112 @@ def main():
             2,
         )
 
-        if config.ENABLE_GUI:
-            cv2.imshow("ALPR Image Test (RPi 5)", img)
+        if getattr(config, "ENABLE_GUI", True):
+            cv2.imshow("ALPR Image Test", img)
             print("Press any key to close window...")
             cv2.waitKey(0)
             cv2.destroyAllWindows()
         return
 
-    # 2. Live Camera Mode
+    # 2. Live Camera Detection & OCR Mode
     cam_src = args.source if args.source else config.CAMERA_SOURCE
+    # Try converting numeric string to int for webcam index
+    try:
+        cam_src = int(cam_src)
+    except (ValueError, TypeError):
+        pass
+
     camera = CameraStream(
         source=cam_src,
-        width=config.CAMERA_WIDTH,
-        height=config.CAMERA_HEIGHT,
-        fps=config.CAMERA_FPS,
-        use_picamera2=config.USE_PICAMERA2,
+        width=getattr(config, "CAMERA_WIDTH", 640),
+        height=getattr(config, "CAMERA_HEIGHT", 480),
+        fps=getattr(config, "CAMERA_FPS", 30),
+        use_picamera2=getattr(config, "USE_PICAMERA2", False),
     )
 
     if not camera.is_opened():
         print(f"\n[ERROR] Could not open camera source '{cam_src}'.")
         print("Troubleshooting options:")
-        print("  1. If using USB webcam, try index 1 or 2: python3 demo_plate.py --source 1")
+        print("  1. If using USB webcam, try: python3 demo_plate.py --source 0 (or 1, 2)")
         print("  2. Check connected video devices: v4l2-ctl --list-devices or ls -l /dev/video*")
-        print("  3. If using RPi Camera Module (ribbon), set USE_PICAMERA2 = True in config.py")
+        print("  3. If using RPi Camera Module, set USE_PICAMERA2 = True in config.py")
         print("  4. Test a static image: python3 demo_plate.py --image test_images/1.jpg\n")
         camera.release()
         return
 
-    print("=== ALPR Live Stream (RPi 5) ===")
-    print("Press 'Q' to exit.")
+    print("\n=======================================================")
+    print("  BASIC CAMERA ALPR DEMO (DETECTION & OCR)")
+    print("=======================================================")
+    print("  - Streaming from camera source...")
+    print("  - [Q / ESC]  : Quit application")
+    print("  - [SPACE / S]: Print current detection details to console\n")
 
-    prev_time = time.time()
+    enable_gui = getattr(config, "ENABLE_GUI", True)
 
     try:
+        prev_time = time.time()
         while True:
             ret, frame = camera.read()
             if not ret or frame is None:
                 time.sleep(0.01)
                 continue
 
+            t0 = time.time()
+            detections = engine.detect_and_read(frame)
+            infer_dt = (time.time() - t0) * 1000.0
+
             curr_time = time.time()
-            fps = 1.0 / max(curr_time - prev_time, 1e-6)
+            fps = 1.0 / (curr_time - prev_time) if (curr_time - prev_time) > 0 else 0.0
             prev_time = curr_time
 
-            detections = engine.detect_and_read(frame)
+            # Draw bounding boxes & text on frame
             engine.draw_plates(frame, detections)
 
-            # Top HUD
+            # Draw overlay status banner
+            h, w = frame.shape[:2]
+            cv2.rectangle(frame, (0, 0), (w, 35), (20, 20, 20), -1)
+            status_text = f"FPS: {fps:.1f} | Infer: {infer_dt:.1f}ms | Plates: {len(detections)}"
             cv2.putText(
                 frame,
-                f"FPS: {fps:.1f} | Detected Plates: {len(detections)}",
-                (10, 30),
+                status_text,
+                (10, 24),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.6,
                 (0, 255, 255),
                 2,
                 cv2.LINE_AA,
             )
 
-            if config.ENABLE_GUI:
-                cv2.imshow("ALPR Camera Demo (RPi 5)", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+            # Print to terminal if plate detected
+            for d in detections:
+                if d["plate"] != "unknown":
+                    print(f"[DETECTED] Plate: '{d['plate']}' | Conf: {d['conf']:.2f} | BBox: {d['bbox']}")
+
+            key = -1
+            if enable_gui:
+                cv2.imshow("ALPR Basic Camera Test", frame)
+                key = cv2.waitKey(1) & 0xFF
             else:
-                if len(detections) > 0:
-                    for d in detections:
-                        print(f"[{time.strftime('%H:%M:%S')}] Detected Plate: {d['plate']} (conf={d['conf']:.2f})")
                 time.sleep(0.03)
+
+            if key in (27, ord("q"), ord("Q")):
+                print("\n[INFO] Exiting...")
+                break
+
+            if key in (32, ord("s"), ord("S"), ord("c"), ord("C")):
+                print(f"\n--- Snapshot Detections ({infer_dt:.1f} ms) ---")
+                if not detections:
+                    print("No plates detected in current frame.")
+                else:
+                    for idx, d in enumerate(detections, 1):
+                        print(f"  #{idx}: Plate='{d['plate']}', Conf={d['conf']:.2f}, Box={d['bbox']}")
+                print("-------------------------------------------\n")
 
     finally:
         camera.release()
-        if config.ENABLE_GUI:
+        if enable_gui:
             cv2.destroyAllWindows()
-        print("[ALPR Demo] Exited.")
+        print("[ALPR Demo] Camera released. Done.")
 
 
 if __name__ == "__main__":

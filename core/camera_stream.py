@@ -53,28 +53,61 @@ class CameraStream:
                 self.use_picamera2 = False
 
         if not self.use_picamera2:
-            # Parse source
             src = self.source
             if isinstance(src, str) and src.isdigit():
                 src = int(src)
 
-            # Try V4L2 backend on Linux/Raspberry Pi
-            try:
-                self.cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
-                if not self.cap.isOpened():
-                    self.cap = cv2.VideoCapture(src)
-            except Exception:
-                self.cap = cv2.VideoCapture(src)
+            self.actual_source = src
+            candidate_sources = [src]
+            if isinstance(src, int) and src != 0:
+                for alt in [2, 4, 1, 3]:
+                    if alt not in candidate_sources:
+                        candidate_sources.append(alt)
 
-            if not self.cap.isOpened():
-                print(f"[CameraStream] WARNING: Could not open camera source '{self.source}'.")
+            opened_src = None
+            for candidate in candidate_sources:
+                if isinstance(candidate, int):
+                    cap_test = cv2.VideoCapture(candidate, cv2.CAP_V4L2)
+                    if not cap_test.isOpened():
+                        cap_test = cv2.VideoCapture(candidate)
+                else:
+                    cap_test = cv2.VideoCapture(candidate)
+
+                if cap_test.isOpened():
+                    try:
+                        cap_test.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    except Exception:
+                        pass
+                    cap_test.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                    cap_test.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                    cap_test.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+                    ret, frame = cap_test.read()
+                    if ret and frame is not None:
+                        self.cap = cap_test
+                        self.actual_source = candidate
+                        self.ret = ret
+                        self.frame = frame
+                        opened_src = candidate
+                        print(f"[CameraStream] Successfully opened video stream on camera source '{candidate}'")
+                        break
+                    else:
+                        cap_test.release()
+
+            if self.cap is None or not self.cap.isOpened():
+                # Final fallback to 0 only if nothing else works
+                print(f"[CameraStream] Requested source {src} unavailable. Attempting fallback to index 0...")
+                self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+                if not self.cap.isOpened():
+                    self.cap = cv2.VideoCapture(0)
+                if self.cap.isOpened():
+                    self.actual_source = 0
+                    self.ret, self.frame = self.cap.read()
+
+            if self.cap is None or not self.cap.isOpened():
+                print(f"[CameraStream] WARNING: Could not open any camera source.")
                 self.ret = False
                 return
-
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            self.cap.set(cv2.CAP_PROP_FPS, self.fps)
-            self.ret, self.frame = self.cap.read()
 
         # Start background capture thread for real-time fresh frames
         self.thread = threading.Thread(target=self._update_loop, daemon=True)
