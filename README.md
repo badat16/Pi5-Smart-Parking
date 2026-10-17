@@ -16,8 +16,31 @@ Phiên bản này được thiết kế và tối ưu riêng cho **Raspberry Pi 
 4. 🏗️ **Quản lý Cổng Tích Hợp (Smart Gate In/Out)**:
    - **Xe Vào (Check-in)**: Tự động ghi nhận biển số và chụp khuôn mặt tài xế -> Lưu phiên vào SQLite -> Mở barrier.
    - **Xe Ra (Check-out)**: Quét biển số ra -> Đối soát chéo với khuôn mặt tài xế lúc vào (Cosine Similarity). Nếu khớp: Cho phép ra và tính thời gian đỗ xe; nếu không khớp: Cảnh báo gian lận / biển số giả.
+5. 🌐 **Web Dashboard Trực Tiếp Trên Raspberry Pi 5**: Host web app (Flask + MJPEG Stream) thay thế hoàn toàn màn hình HDMI. Cho phép thiết bị trong cùng mạng LAN (laptop, điện thoại, tablet) theo dõi live camera, bản đồ 12 ô đỗ, CPU/RAM/Temp/FPS và điều khiển Check-in/out từ xa.
 
 ---
+
+## 🌐 Hướng Dẫn Truy Cập Web Dashboard Từ Trình Duyệt
+
+khi hệ thống chạy, Web Dashboard tự động mở tại cổng `5000`:
+
+1. **Tìm địa chỉ IP của Raspberry Pi 5 trong mạng LAN**:
+   ```bash
+   hostname -I
+   # Ví dụ đầu ra: 192.168.1.150
+   ```
+2. **Mở trình duyệt trên máy tính / điện thoại / tablet cùng mạng LAN**:
+   ```
+   http://192.168.1.150:5000
+   ```
+3. **Các tính năng trên Dashboard**:
+   - 📷 **Live Cameras**: Luồng MJPEG realtime từ Camera Tracking (Cam 0) và Camera Gate (Cam 1).
+   - 🅿️ **Parking Lot Map**: Bản đồ trực quan 4 Khu (A, B, C, D) & 12 ô đỗ (A1..D3) cập nhật màu xanh (trống) / đỏ (đang đỗ) theo thời gian thực.
+   - ⚡ **System Telemetry**: Theo dõi chỉ số phần cứng (CPU %, RAM %, Nhiệt độ CPU, AI FPS, trạng thái camera).
+   - 🔘 **Remote Controls**: Kích hoạt từ xa nút Check-in (Xe Vào), Check-out (Xe Ra), Quét mắt Tìm Xe.
+
+---
+
 
 ## ⚙️ Yêu cầu Phần cứng Khuyến nghị
 
@@ -189,13 +212,22 @@ smart_parking_rpi5/
 │   ├── best.pt                    # Trọng số nhận diện xe (5.3MB)
 │   └── download_models.py         # Script tự động tải InsightFace buffalo_sc
 │
+├── web/                           # Phân hệ Web Dashboard (Flask + HTML5 + CSS + JS)
+│   ├── app.py                     # Flask server routes, MJPEG streaming & WebState
+│   ├── templates/
+│   │   └── index.html             # Giao diện Web Dashboard (Glassmorphism Dark Mode)
+│   └── static/
+│       ├── css/dashboard.css      # CSS styling & responsive layout
+│       └── js/dashboard.js        # JavaScript polling client & interactive controls
+│
 ├── yolov5/                        # Mã nguồn YOLOv5 inference engine cục bộ
 ├── test_images/                   # Ảnh mẫu để kiểm thử ALPR
-├── main_parking_system.py         # Ứng dụng chính: Cổng bãi đỗ xe thông minh (Vào/Ra)
+├── main_parking_system.py         # Ứng dụng chính: Cổng bãi đỗ xe thông minh (Vào/Ra + Web Server)
 ├── demo_face.py                   # Script test riêng nhận diện khuôn mặt
 ├── demo_plate.py                  # Script test riêng nhận diện biển số
 └── demo_tracking.py               # Script test riêng theo dõi xe
 ```
+
 
 ---
 

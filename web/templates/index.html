@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Parking System - Web Dashboard (Raspberry Pi 5)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation Bar -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="logo-icon">🚗</div>
+                <div>
+                    <h1>SMART PARKING SYSTEM</h1>
+                    <span class="subtitle">Raspberry Pi 5 Edition • Dual Camera Realtime Dashboard</span>
+                </div>
+            </div>
+
+            <div class="telemetry-bar">
+                <div class="badge-card" id="badge-fps">
+                    <span class="badge-label">AI FPS</span>
+                    <span class="badge-value" id="val-fps">--</span>
+                </div>
+                <div class="badge-card" id="badge-temp">
+                    <span class="badge-label">CPU TEMP</span>
+                    <span class="badge-value" id="val-temp">-- °C</span>
+                </div>
+                <div class="badge-card" id="badge-cpu">
+                    <span class="badge-label">CPU USAGE</span>
+                    <span class="badge-value" id="val-cpu">-- %</span>
+                </div>
+                <div class="badge-card" id="badge-ram">
+                    <span class="badge-label">RAM USAGE</span>
+                    <span class="badge-value" id="val-ram">-- %</span>
+                </div>
+                <div class="badge-card badge-status-ok" id="badge-system">
+                    <span class="badge-label">SYSTEM</span>
+                    <span class="badge-value" id="val-system">ONLINE</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Content Grid -->
+        <main class="dashboard-grid">
+            <!-- Dual Live Camera Stream Section -->
+            <section class="card camera-section">
+                <div class="card-header">
+                    <h2>📷 LIVE CAMERA FEEDS</h2>
+                    <div class="camera-indicators">
+                        <span class="cam-indicator" id="ind-cam-track"><span class="dot"></span> Cam 0: Tracking</span>
+                        <span class="cam-indicator" id="ind-cam-gate"><span class="dot"></span> Cam 1: Gate</span>
+                    </div>
+                </div>
+                <div class="camera-grid">
+                    <div class="camera-box">
+                        <div class="camera-title">WINDOW 1: VEHICLE TRACKING & SLOT MAP (CAM 0)</div>
+                        <div class="stream-container">
+                            <img src="/video_feed/tracking" alt="Tracking Camera Stream" id="stream-tracking" class="stream-img">
+                        </div>
+                    </div>
+                    <div class="camera-box">
+                        <div class="camera-title">WINDOW 2: ENTRY/EXIT GATE & FACE SCAN (CAM 1)</div>
+                        <div class="stream-container">
+                            <img src="/video_feed/gate" alt="Gate Camera Stream" id="stream-gate" class="stream-img">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Gate Control & Transaction Info Panel -->
+            <section class="card control-section">
+                <div class="card-header">
+                    <h2>🚧 GATE CONTROL & GATE STATUS</h2>
+                    <span class="barrier-pill" id="barrier-status-pill">BARRIER: CLOSED</span>
+                </div>
+
+                <div class="status-banner" id="system-status-banner">
+                    <div class="banner-title">Hệ thống sẵn sàng</div>
+                    <div class="banner-sub" id="last-transaction-sub">Chưa có giao dịch mới</div>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn btn-checkin" onclick="triggerAction('checkin')">
+                        <span class="btn-icon">📥</span> CHECK-IN (XE VÀO) [I]
+                    </button>
+                    <button class="btn btn-checkout" onclick="triggerAction('checkout')">
+                        <span class="btn-icon">📤</span> CHECK-OUT (XE RA) [O]
+                    </button>
+                    <button class="btn btn-findcar" onclick="triggerAction('find_car')">
+                        <span class="btn-icon">🔍</span> TÌM XE QUÁ MẮT [F]
+                    </button>
+                </div>
+
+                <div class="parking-summary-box">
+                    <div class="summary-item">
+                        <span class="num-val text-accent" id="sum-occupied">0</span>
+                        <span class="lbl-txt">Xe Đang Đỗ</span>
+                    </div>
+                    <div class="summary-divider"></div>
+                    <div class="summary-item">
+                        <span class="num-val text-success" id="sum-vacant">12</span>
+                        <span class="lbl-txt">Ô Trống</span>
+                    </div>
+                    <div class="summary-divider"></div>
+                    <div class="summary-item">
+                        <span class="num-val text-warning" id="sum-pending">0</span>
+                        <span class="lbl-txt">Chờ Gán Vị Trí</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Interactive Parking Map Grid (12 Slots) -->
+            <section class="card parking-map-section">
+                <div class="card-header">
+                    <h2>🅿️ PARKING LOT MAP (4 KHU • 12 Ô ĐỖ)</h2>
+                    <div class="legend-box">
+                        <span class="legend-item"><span class="legend-dot vacant"></span> Ô Trống</span>
+                        <span class="legend-item"><span class="legend-dot occupied"></span> Đang Đỗ</span>
+                    </div>
+                </div>
+
+                <div class="zones-container">
+                    <!-- Zone A -->
+                    <div class="zone-block" id="zone-A">
+                        <div class="zone-title">KHU A (Trái Trên)</div>
+                        <div class="slots-grid">
+                            <div class="slot-card vacant" id="slot-A1">
+                                <div class="slot-header">A1</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-A2">
+                                <div class="slot-header">A2</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-A3">
+                                <div class="slot-header">A3</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Zone B -->
+                    <div class="zone-block" id="zone-B">
+                        <div class="zone-title">KHU B (Phải Trên)</div>
+                        <div class="slots-grid">
+                            <div class="slot-card vacant" id="slot-B1">
+                                <div class="slot-header">B1</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-B2">
+                                <div class="slot-header">B2</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-B3">
+                                <div class="slot-header">B3</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Zone C -->
+                    <div class="zone-block" id="zone-C">
+                        <div class="zone-title">KHU C (Trái Dưới)</div>
+                        <div class="slots-grid">
+                            <div class="slot-card vacant" id="slot-C1">
+                                <div class="slot-header">C1</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-C2">
+                                <div class="slot-header">C2</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-C3">
+                                <div class="slot-header">C3</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Zone D -->
+                    <div class="zone-block" id="zone-D">
+                        <div class="zone-title">KHU D (Phải Dưới)</div>
+                        <div class="slots-grid">
+                            <div class="slot-card vacant" id="slot-D1">
+                                <div class="slot-header">D1</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-D2">
+                                <div class="slot-header">D2</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                            <div class="slot-card vacant" id="slot-D3">
+                                <div class="slot-header">D3</div>
+                                <div class="slot-status">TRỐNG</div>
+                                <div class="slot-info">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recent Activity Log Section -->
+            <section class="card history-section">
+                <div class="card-header">
+                    <h2>📋 LỊCH SỬ GIAO DỊCH GẦN ĐÂY</h2>
+                    <button class="btn-refresh" onclick="fetchRecentSessions()">🔄 Làm mới</button>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID PHIÊN</th>
+                                <th>BIỂN SỐ XE</th>
+                                <th>TÀI XẾ</th>
+                                <th>THỜI GIAN VÀO</th>
+                                <th>THỜI GIAN RA</th>
+                                <th>THỜI GIAN GỬI</th>
+                                <th>TRẠNG THÁI</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessions-table-body">
+                            <tr>
+                                <td colspan="7" class="empty-msg">Chưa có thông tin phiên đỗ xe...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

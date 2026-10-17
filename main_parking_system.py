@@ -28,9 +28,11 @@ from core.camera_stream import CameraStream
 from core.face_engine import FaceEngine
 from core.plate_engine import PlateEngine
 from core.vehicle_tracker import VehicleTracker
+from web.app import web_state, start_web_server_thread
 
 
 class DualCameraSmartParking:
+
     def __init__(self, cam_tracking_src=None, cam_gate_src=None, headless: bool = False):
         self.headless = headless or not config.ENABLE_GUI
 
@@ -129,7 +131,16 @@ class DualCameraSmartParking:
         self.last_gate_frame_time = 0.0
         self.cached_gate_display = None
 
+        # 6. Initialize Web Dashboard Server (Flask Daemon Thread)
+        self.enable_web = getattr(config, "ENABLE_WEB_SERVER", True)
+        if self.enable_web:
+            web_host = getattr(config, "WEB_HOST", "0.0.0.0")
+            web_port = getattr(config, "WEB_PORT", 5000)
+            print(f"[Init] Starting Flask Web Dashboard Server on http://{web_host}:{web_port}...")
+            self.web_thread = start_web_server_thread(host=web_host, port=web_port)
+
     def handle_checkin(self, gate_frame: np.ndarray) -> None:
+
         """Execute Face + LP detection ON-DEMAND when Check-in button is pressed."""
         print("\n--- [GATE IN / CHECK-IN] EXECUTE FACE + LP RECOGNITION ---")
 
@@ -473,7 +484,51 @@ class DualCameraSmartParking:
 
                 display_gate = self.cached_gate_display if self.cached_gate_display is not None else self.draw_gate_dashboard(frame_gate, fps)
 
-                # 4. Render GUI windows
+                # 4. Sync State & Encoded Frames with Web Server (Flask Dashboard)
+                if self.enable_web:
+                    web_state.update_frames(display_tracking, display_gate)
+
+                    tracks_json = []
+                    for tr in tracks:
+                        display_box = tr.box if tr.missed == 0 else tr.predicted_box()
+                        plate_str = ""
+                        if tr.track_id in self.track_session_map:
+                            plate_str = self.track_session_map[tr.track_id].get("plate", "")
+                        tracks_json.append({
+                            "track_id": tr.track_id,
+                            "class_id": tr.class_id,
+                            "confidence": round(float(tr.conf), 2),
+                            "slot": getattr(tr, "assigned_slot", None),
+                            "zone": getattr(tr, "assigned_zone", None),
+                            "plate": plate_str,
+                            "bbox": [int(v) for v in display_box],
+                        })
+
+                    recent_sessions = self.db.get_recent_sessions(limit=10)
+
+                    web_state.update_telemetry(
+                        fps=fps,
+                        occupancy=self.current_occupancy,
+                        tracks=tracks_json,
+                        status_msg=self.last_status_msg,
+                        status_color=self.last_status_color,
+                        barrier_status=self.barrier_status,
+                        last_transaction=self.last_transaction_info,
+                        active_cars_count=self.db.active_count(),
+                        pending_sessions_count=len(self.pending_sessions),
+                        recent_sessions=recent_sessions,
+                    )
+
+                    # Check for remote web triggers (Check-in, Check-out, Find Car)
+                    remote_action = web_state.pop_action()
+                    if remote_action == "checkin":
+                        self.handle_checkin(frame_gate)
+                    elif remote_action == "checkout":
+                        self.handle_checkout(frame_gate)
+                    elif remote_action == "find_car":
+                        self.handle_find_my_car(frame_gate)
+
+                # 5. Render GUI windows
                 key = -1
                 if not self.headless:
                     cv2.imshow("1. Smart Parking - Vehicle Tracking (Camera 0)", display_tracking)
@@ -498,6 +553,7 @@ class DualCameraSmartParking:
                 if key in (ord("f"), ord("s"), ord("F"), ord("S")):
                     self.handle_find_my_car(frame_gate)
 
+
         finally:
             self.cam_tracking.release()
             if self.cam_gate is not self.cam_tracking:
@@ -509,11 +565,18 @@ class DualCameraSmartParking:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Smart Parking Dual Camera System (RPi 5)")
+    parser = argparse.ArgumentParser(description="Smart Parking Dual Camera System with Web Dashboard (RPi 5)")
     parser.add_argument("--cam-tracking", type=int, default=0, help="Camera index for vehicle tracking (default 0)")
     parser.add_argument("--cam-gate", type=int, default=1, help="Camera index for entry/exit gate (default 1)")
     parser.add_argument("--headless", action="store_true", help="Run without GUI window")
+    parser.add_argument("--no-web", action="store_true", help="Disable Web Dashboard server")
+    parser.add_argument("--web-port", type=int, default=5000, help="Web Dashboard server port (default 5000)")
     args = parser.parse_args()
+
+    if args.no_web:
+        config.ENABLE_WEB_SERVER = False
+    if args.web_port:
+        config.WEB_PORT = args.web_port
 
     app = DualCameraSmartParking(
         cam_tracking_src=args.cam_tracking,
@@ -525,3 +588,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

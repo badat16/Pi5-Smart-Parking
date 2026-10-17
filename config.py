@@ -20,9 +20,9 @@ FACE_MODEL_NAME = "buffalo_sc"
 
 # Camera Settings
 # Set CAMERA_SOURCE to an integer (0, 1) for USB webcam, or a video path/RTSP string
-CAMERA_SOURCE = 0
-TRACKING_CAMERA_SOURCE = 0  # Overhead camera for vehicle & slot tracking
-GATE_CAMERA_SOURCE = 2      # Entry/Exit gate camera for face & license plate recognition
+CAMERA_SOURCE = 2
+TRACKING_CAMERA_SOURCE = 2  # Overhead camera for vehicle & slot tracking
+GATE_CAMERA_SOURCE = 0      # Entry/Exit gate camera for face & license plate recognition
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 TRACKING_CAMERA_FPS = 30
@@ -124,4 +124,12 @@ SKIP_FRAMES = 0  # Process every frame (0), or skip frames (1, 2) to reduce CPU 
 
 # GUI / Display
 ENABLE_GUI = True  # Set to False when running headless over SSH without X11
+
+# Web Server Settings (Flask Dashboard for Raspberry Pi 5)
+ENABLE_WEB_SERVER = True
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 5000
+WEB_STREAM_QUALITY = 70  # JPEG Compression Quality (1-100) for MJPEG stream
+WEB_STREAM_FPS = 15      # Stream frame rate throttle to minimize CPU / Network load
+
 
