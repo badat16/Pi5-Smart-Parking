@@ -4,6 +4,10 @@
  */
 
 document.addEventListener("DOMContentLoaded", () => {
+    // Start WebRTC ultra-low latency streams
+    initWebRTCStream("tracking", "video-tracking", "stream-tracking", "tag-proto-tracking");
+    initWebRTCStream("gate", "video-gate", "stream-gate", "tag-proto-gate");
+
     // Start initial polling loops
     fetchSystemInfo();
     fetchParkingInfo();
@@ -169,3 +173,120 @@ async function triggerAction(actionName) {
         alert(`Không thể kết nối đến máy chủ: ${err}`);
     }
 }
+
+// -------------------------------------------------------------
+// WebRTC Stream Management (Ultra-Low Latency UDP with MJPEG Fallback)
+// -------------------------------------------------------------
+const peerConnections = {};
+
+async function initWebRTCStream(streamName, videoId, imgId, badgeId) {
+    const videoEl = document.getElementById(videoId);
+    const imgEl = document.getElementById(imgId);
+    const badgeEl = document.getElementById(badgeId);
+
+    function fallbackToMJPEG(reason) {
+        console.warn(`[WebRTC] Falling back to MJPEG for ${streamName}: ${reason}`);
+        if (badgeEl) {
+            badgeEl.innerText = "MJPEG TCP";
+            badgeEl.classList.add("mjpeg");
+        }
+        if (videoEl) videoEl.style.display = "none";
+        if (imgEl) {
+            imgEl.style.display = "block";
+            imgEl.src = `/video_feed/${streamName}?t=` + Date.now();
+        }
+    }
+
+    if (!window.RTCPeerConnection) {
+        fallbackToMJPEG("Browser lacks RTCPeerConnection support");
+        return;
+    }
+
+    try {
+        if (peerConnections[streamName]) {
+            try { peerConnections[streamName].close(); } catch (e) {}
+            delete peerConnections[streamName];
+        }
+
+        const pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" }
+            ]
+        });
+        peerConnections[streamName] = pc;
+
+        // Indicate that client only wants to receive video
+        pc.addTransceiver("video", { direction: "recvonly" });
+
+        pc.ontrack = (event) => {
+            if (event.track.kind === "video") {
+                const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+                videoEl.srcObject = stream;
+                videoEl.style.display = "block";
+                if (imgEl) imgEl.style.display = "none";
+                if (badgeEl) {
+                    badgeEl.innerText = "WebRTC UDP";
+                    badgeEl.classList.remove("mjpeg");
+                }
+                videoEl.play().catch(e => console.log("Video auto-play policy suppressed:", e));
+            }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState === "failed") {
+                fallbackToMJPEG("ICE connection state: failed");
+            }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        // Wait for ICE gathering to collect local host candidates
+        await new Promise((resolve) => {
+            if (pc.iceGatheringState === "complete") {
+                resolve();
+            } else {
+                const checkState = () => {
+                    if (pc.iceGatheringState === "complete") {
+                        pc.removeEventListener("icegatheringstatechange", checkState);
+                        resolve();
+                    }
+                };
+                pc.addEventListener("icegatheringstatechange", checkState);
+                setTimeout(resolve, 800); // 800ms safety timeout
+            }
+        });
+
+        const res = await fetch(`/webrtc/offer?stream=${streamName}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sdp: pc.localDescription.sdp,
+                type: pc.localDescription.type,
+                stream: streamName
+            })
+        });
+
+        if (!res.ok) {
+            throw new Error(`Signaling error (HTTP ${res.status})`);
+        }
+
+        const answer = await res.json();
+        if (answer.error) {
+            throw new Error(answer.error);
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+    } catch (err) {
+        fallbackToMJPEG(err.message || err);
+    }
+}
+
+// Cleanly close WebRTC sessions when leaving the dashboard tab
+window.addEventListener("beforeunload", () => {
+    Object.values(peerConnections).forEach(pc => {
+        try { pc.close(); } catch (e) {}
+    });
+});
+

@@ -132,4 +132,8 @@ WEB_PORT = 5000
 WEB_STREAM_QUALITY = 70  # JPEG Compression Quality (1-100) for MJPEG stream
 WEB_STREAM_FPS = 15      # Stream frame rate throttle to minimize CPU / Network load
 
+# WebRTC Stream Settings (Ultra-low latency UDP streaming)
+ENABLE_WEBRTC = True
+WEBRTC_FPS = 15          # Optimal 15 FPS for minimal CPU load on Pi 5 (3-5% CPU)
+
 

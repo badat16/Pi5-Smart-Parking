@@ -20,7 +20,11 @@ class WebState:
     def __init__(self):
         self._lock = threading.Lock()
 
-        # Frame buffers (JPEG bytes)
+        # Raw frame buffers (numpy BGR arrays for WebRTC / zero re-encoding)
+        self.tracking_frame_raw: Optional[np.ndarray] = None
+        self.gate_frame_raw: Optional[np.ndarray] = None
+
+        # Frame buffers (JPEG bytes for MJPEG fallback)
         self.tracking_frame_jpeg: Optional[bytes] = None
         self.gate_frame_jpeg: Optional[bytes] = None
 
@@ -42,7 +46,7 @@ class WebState:
         self.action_queue: List[str] = []
 
     def update_frames(self, tracking_frame: Optional[np.ndarray], gate_frame: Optional[np.ndarray]) -> None:
-        """Encode OpenCV BGR frames to JPEG and update shared buffer."""
+        """Update shared raw frames (for WebRTC) and encode JPEG (for MJPEG fallback)."""
         quality = getattr(config, "WEB_STREAM_QUALITY", 70)
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
 
@@ -59,12 +63,23 @@ class WebState:
                 gate_bytes = buf.tobytes()
 
         with self._lock:
+            if tracking_frame is not None and tracking_frame.size > 0:
+                self.tracking_frame_raw = tracking_frame
+                self.cam_tracking_active = True
+            if gate_frame is not None and gate_frame.size > 0:
+                self.gate_frame_raw = gate_frame
+                self.cam_gate_active = True
             if track_bytes:
                 self.tracking_frame_jpeg = track_bytes
-                self.cam_tracking_active = True
             if gate_bytes:
                 self.gate_frame_jpeg = gate_bytes
-                self.cam_gate_active = True
+
+    def get_raw_frame(self, stream_type: str) -> Optional[np.ndarray]:
+        """Fetch latest raw numpy BGR frame for WebRTC encoding."""
+        with self._lock:
+            if stream_type == "tracking":
+                return self.tracking_frame_raw
+            return self.gate_frame_raw
 
     def update_telemetry(
         self,
@@ -195,6 +210,22 @@ def create_app() -> Flask:
             mjpeg_generator("gate"),
             mimetype="multipart/x-mixed-replace; boundary=frame",
         )
+
+    @app.route("/webrtc/offer", methods=["POST"])
+    def webrtc_offer():
+        """WebRTC signaling endpoint to negotiate low-latency video stream."""
+        if not getattr(config, "ENABLE_WEBRTC", True):
+            return jsonify({"error": "WebRTC is disabled in config"}), 400
+
+        try:
+            from web.webrtc import handle_offer_sync
+            params = request.get_json(force=True)
+            if request.args.get("stream"):
+                params["stream"] = request.args.get("stream")
+            answer = handle_offer_sync(params, web_state)
+            return jsonify(answer)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/api/system")
     def api_system():

@@ -58,15 +58,23 @@
                 </div>
                 <div class="camera-grid">
                     <div class="camera-box">
-                        <div class="camera-title">WINDOW 1: VEHICLE TRACKING & SLOT MAP (CAM 0)</div>
+                        <div class="camera-title">
+                            <span>WINDOW 1: VEHICLE TRACKING & SLOT MAP (CAM 0)</span>
+                            <span class="stream-protocol-tag" id="tag-proto-tracking">WebRTC UDP</span>
+                        </div>
                         <div class="stream-container">
-                            <img src="/video_feed/tracking" alt="Tracking Camera Stream" id="stream-tracking" class="stream-img">
+                            <video id="video-tracking" class="stream-video" autoplay playsinline muted></video>
+                            <img src="/video_feed/tracking" alt="Tracking Camera Stream" id="stream-tracking" class="stream-img" style="display: none;">
                         </div>
                     </div>
                     <div class="camera-box">
-                        <div class="camera-title">WINDOW 2: ENTRY/EXIT GATE & FACE SCAN (CAM 1)</div>
+                        <div class="camera-title">
+                            <span>WINDOW 2: ENTRY/EXIT GATE & FACE SCAN (CAM 1)</span>
+                            <span class="stream-protocol-tag" id="tag-proto-gate">WebRTC UDP</span>
+                        </div>
                         <div class="stream-container">
-                            <img src="/video_feed/gate" alt="Gate Camera Stream" id="stream-gate" class="stream-img">
+                            <video id="video-gate" class="stream-video" autoplay playsinline muted></video>
+                            <img src="/video_feed/gate" alt="Gate Camera Stream" id="stream-gate" class="stream-img" style="display: none;">
                         </div>
                     </div>
                 </div>
