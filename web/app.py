@@ -42,7 +42,12 @@ class WebState:
         self.cam_tracking_active: bool = False
         self.cam_gate_active: bool = False
 
-        # Action queue for remote web triggers (checkin, checkout, find_car)
+        # Hardware Barrier states (SG90 Servos)
+        self.entry_barrier_status: str = "CLOSED"
+        self.exit_barrier_status: str = "CLOSED"
+        self.hardware_enabled: bool = False
+
+        # Action queue for remote web triggers (checkin, checkout, find_car, barrier controls)
         self.action_queue: List[str] = []
 
     def update_frames(self, tracking_frame: Optional[np.ndarray], gate_frame: Optional[np.ndarray]) -> None:
@@ -93,6 +98,9 @@ class WebState:
         active_cars_count: int,
         pending_sessions_count: int,
         recent_sessions: List[Dict[str, Any]],
+        entry_barrier_status: str = "CLOSED",
+        exit_barrier_status: str = "CLOSED",
+        hardware_enabled: bool = False,
     ) -> None:
         """Update system state variables safely."""
         with self._lock:
@@ -106,6 +114,9 @@ class WebState:
             self.active_cars_count = active_cars_count
             self.pending_sessions_count = pending_sessions_count
             self.recent_sessions = recent_sessions
+            self.entry_barrier_status = entry_barrier_status
+            self.exit_barrier_status = exit_barrier_status
+            self.hardware_enabled = hardware_enabled
 
     def get_tracking_jpeg(self) -> Optional[bytes]:
         with self._lock:
@@ -298,6 +309,9 @@ def create_app() -> Flask:
             barrier = web_state.barrier_status
             last_tx = web_state.last_transaction
             active_count = web_state.active_cars_count
+            entry_barrier = web_state.entry_barrier_status
+            exit_barrier = web_state.exit_barrier_status
+            hw_enabled = web_state.hardware_enabled
 
         # Convert BGR tuple to HEX string
         hex_color = f"#{color_bgr[2]:02x}{color_bgr[1]:02x}{color_bgr[0]:02x}"
@@ -306,6 +320,9 @@ def create_app() -> Flask:
             "status_msg": msg,
             "status_color_hex": hex_color,
             "barrier_status": barrier,
+            "entry_barrier": entry_barrier,
+            "exit_barrier": exit_barrier,
+            "hardware_enabled": hw_enabled,
             "last_transaction": last_tx,
             "active_cars_count": active_count,
         })
@@ -319,7 +336,14 @@ def create_app() -> Flask:
     @app.route("/api/action/<action_name>", methods=["POST"])
     def api_action(action_name: str):
         action_name = action_name.lower().strip()
-        valid_actions = ["checkin", "checkout", "find_car"]
+        valid_actions = [
+            "checkin",
+            "checkout",
+            "find_car",
+            "open_entry_barrier",
+            "open_exit_barrier",
+            "close_barriers",
+        ]
         if action_name not in valid_actions:
             return jsonify({"success": False, "error": f"Invalid action. Choice: {valid_actions}"}), 400
 

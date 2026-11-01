@@ -28,6 +28,7 @@ from core.camera_stream import CameraStream
 from core.face_engine import FaceEngine
 from core.plate_engine import PlateEngine
 from core.vehicle_tracker import VehicleTracker
+from core.barrier_controller import BarrierController
 from web.app import web_state, start_web_server_thread
 
 
@@ -130,8 +131,13 @@ class DualCameraSmartParking:
         # Gate window FPS rate limiter (10 FPS)
         self.last_gate_frame_time = 0.0
         self.cached_gate_display = None
+        self._is_processing_gate = False
 
-        # 6. Initialize Web Dashboard Server (Flask Daemon Thread)
+        # 6. Initialize Hardware Barrier & Buttons (Raspberry Pi 5 GPIO)
+        print("[Init] Initializing Hardware Barrier Controller (SG90 Servos & Buttons)...")
+        self.barrier_controller = BarrierController(action_callback=self._on_hardware_action)
+
+        # 7. Initialize Web Dashboard Server (Flask Daemon Thread)
         self.enable_web = getattr(config, "ENABLE_WEB_SERVER", True)
         if self.enable_web:
             web_host = getattr(config, "WEB_HOST", "0.0.0.0")
@@ -139,150 +145,182 @@ class DualCameraSmartParking:
             print(f"[Init] Starting Flask Web Dashboard Server on http://{web_host}:{web_port}...")
             self.web_thread = start_web_server_thread(host=web_host, port=web_port)
 
+    def _on_hardware_action(self, action: str) -> None:
+        """Forward physical button press actions into web_state queue."""
+        web_state.push_action(action)
+
     def handle_checkin(self, gate_frame: np.ndarray) -> None:
-
         """Execute Face + LP detection ON-DEMAND when Check-in button is pressed."""
-        print("\n--- [GATE IN / CHECK-IN] EXECUTE FACE + LP RECOGNITION ---")
+        if self.barrier_controller.entry_state == "OPEN":
+            print("\n[GATE IN] Barrier Vào đang mở, bỏ qua lệnh Check-in lặp lại.")
+            return
 
-        t0 = time.time()
-        detected_plates = self.plate_engine.detect_and_read(gate_frame)
-        faces = self.face_engine.analyze(gate_frame)
-        dt = (time.time() - t0) * 1000.0
+        if self._is_processing_gate:
+            print("\n[GATE IN] Hệ thống đang bận xử lý cổng, vui lòng đợi...")
+            return
 
-        # Face Requirement Check
-        primary_face = self.face_engine.choose_primary_face(faces)
-        embedding = None
-        if primary_face is not None:
-            embedding = self.face_engine.get_embedding(primary_face)
+        self._is_processing_gate = True
+        try:
+            print("\n--- [GATE IN / CHECK-IN] EXECUTE FACE + LP RECOGNITION ---")
 
-        if embedding is None:
-            self.last_status_msg = "CHECK-IN THAT BAI: CHUA NHAN DIEN DUOC KHUON MAT! VUI LONG THU LAI [I]"
-            self.last_status_color = (0, 0, 255)
-            self.barrier_status = "BARRIER: LOCKED (CANH BAO)"
-            print("\n[ERROR] Check-in That bai: Khong tim thay khuon mat tai xe rõ rang.")
-            print("[GUIDE] Vui long nhin thang vao Camera cong va an [I] de thu lai.")
+            t0 = time.time()
+            detected_plates = self.plate_engine.detect_and_read(gate_frame)
+            faces = self.face_engine.analyze(gate_frame)
+            dt = (time.time() - t0) * 1000.0
 
-            # Snapshot error overlay
+            # Face Requirement Check
+            primary_face = self.face_engine.choose_primary_face(faces)
+            embedding = None
+            if primary_face is not None:
+                embedding = self.face_engine.get_embedding(primary_face)
+
+            if embedding is None:
+                self.last_status_msg = "CHECK-IN THAT BAI: CHUA NHAN DIEN DUOC KHUON MAT! VUI LONG THU LAI [I]"
+                self.last_status_color = (0, 0, 255)
+                self.barrier_status = "BARRIER: LOCKED (CANH BAO)"
+                self.barrier_controller.close_entry_barrier()
+                print("\n[ERROR] Check-in That bai: Khong tim thay khuon mat tai xe rõ rang.")
+                print("[GUIDE] Vui long nhin thang vao Camera cong va an [I] de thu lai.")
+
+                # Snapshot error overlay
+                res_frame = gate_frame.copy()
+                self.plate_engine.draw_plates(res_frame, detected_plates)
+                self.face_engine.draw_faces(res_frame, faces)
+                self.last_gate_result_overlay = res_frame
+                return
+
+            # Extract plate string
+            plate_str = "UNKNOWN"
+            for p in detected_plates:
+                if p["plate"] != "unknown":
+                    plate_str = p["plate"]
+                    break
+
+            if plate_str == "UNKNOWN" and not self.headless:
+                manual_plate = input("Nhap bien so xe thu cong (Enter de bo qua): ").strip().upper()
+                if manual_plate:
+                    plate_str = manual_plate
+
+            # Register session in database
+            driver_name = ""
+            session_id = self.db.register(driver_name, plate_str, embedding)
+
+            session_data = {
+                "id": session_id,
+                "plate": plate_str,
+                "embedding": embedding,
+                "time_in": datetime.now().strftime("%H:%M:%S"),
+            }
+            self.pending_sessions.append(session_data)
+
+            self.last_status_msg = f"CHECK-IN OK: ID #{session_id} | Plate: {plate_str} ({dt:.0f}ms)"
+            self.last_status_color = (0, 255, 0)
+            self.barrier_status = "BARRIER: OPEN (CHECK-IN)"
+            self.last_transaction_info = f"IN: #{session_id} | Plate: {plate_str} | {session_data['time_in']}"
+
+            print(f"[SUCCESS] {self.last_status_msg}")
+            print(f"[GATE] Cong barrier MO cho xe #{session_id} vao bai. (Pending auto-assign to next car track)")
+            self.barrier_controller.open_entry_barrier()
+
             res_frame = gate_frame.copy()
             self.plate_engine.draw_plates(res_frame, detected_plates)
             self.face_engine.draw_faces(res_frame, faces)
             self.last_gate_result_overlay = res_frame
-            return
-
-        # Extract plate string
-        plate_str = "UNKNOWN"
-        for p in detected_plates:
-            if p["plate"] != "unknown":
-                plate_str = p["plate"]
-                break
-
-        if plate_str == "UNKNOWN" and not self.headless:
-            manual_plate = input("Nhap bien so xe thu cong (Enter de bo qua): ").strip().upper()
-            if manual_plate:
-                plate_str = manual_plate
-
-        # Register session in database
-        driver_name = ""
-        session_id = self.db.register(driver_name, plate_str, embedding)
-
-        session_data = {
-            "id": session_id,
-            "plate": plate_str,
-            "embedding": embedding,
-            "time_in": datetime.now().strftime("%H:%M:%S"),
-        }
-        self.pending_sessions.append(session_data)
-
-        self.last_status_msg = f"CHECK-IN OK: ID #{session_id} | Plate: {plate_str} ({dt:.0f}ms)"
-        self.last_status_color = (0, 255, 0)
-        self.barrier_status = "BARRIER: OPEN (CHECK-IN)"
-        self.last_transaction_info = f"IN: #{session_id} | Plate: {plate_str} | {session_data['time_in']}"
-
-        print(f"[SUCCESS] {self.last_status_msg}")
-        print(f"[GATE] Cong barrier MO cho xe #{session_id} vao bai. (Pending auto-assign to next car track)")
-
-        res_frame = gate_frame.copy()
-        self.plate_engine.draw_plates(res_frame, detected_plates)
-        self.face_engine.draw_faces(res_frame, faces)
-        self.last_gate_result_overlay = res_frame
+        finally:
+            self._is_processing_gate = False
 
     def handle_checkout(self, gate_frame: np.ndarray) -> None:
         """Execute Dual Face + LP verification ON-DEMAND when Check-out button is pressed."""
-        print("\n--- [GATE OUT / CHECK-OUT] EXECUTE DUAL FACE + LP VERIFICATION ---")
-
-        t0 = time.time()
-        detected_plates = self.plate_engine.detect_and_read(gate_frame)
-        faces = self.face_engine.analyze(gate_frame)
-        dt = (time.time() - t0) * 1000.0
-
-        plate_str = "UNKNOWN"
-        for p in detected_plates:
-            if p["plate"] != "unknown":
-                plate_str = p["plate"]
-                break
-
-        primary_face = self.face_engine.choose_primary_face(faces)
-        exit_emb = None
-        if primary_face is not None:
-            exit_emb = self.face_engine.get_embedding(primary_face)
-
-        session = None
-        if plate_str != "UNKNOWN":
-            session = self.db.find_active_by_plate(plate_str)
-
-        if session is None and exit_emb is not None:
-            print("[Info] Quet phien gui theo nhan dien khuon mat...")
-            session = self.db.find_best_face_active(exit_emb)
-
-        if session is None and not self.headless:
-            manual = input("Khong tim thay phien. Nhap bien so thu cong: ").strip().upper()
-            if manual:
-                session = self.db.find_active_by_plate(manual)
-
-        if session is None:
-            self.last_status_msg = f"CHECK-OUT FAIL: Khong tim thay phien gui ({dt:.0f}ms)"
-            self.last_status_color = (0, 0, 255)
-            self.barrier_status = "BARRIER: LOCKED"
-            print(f"[ERROR] {self.last_status_msg}")
+        if self.barrier_controller.exit_state == "OPEN":
+            print("\n[GATE OUT] Barrier Ra đang mở, bỏ qua lệnh Check-out lặp lại.")
             return
 
-        session_id = session["id"]
-        saved_plate = session["plate"]
-        saved_emb = session.get("embedding", None)
+        if self._is_processing_gate:
+            print("\n[GATE OUT] Hệ thống đang bận xử lý cổng, vui lòng đợi...")
+            return
 
-        sim_score = 0.0
-        face_match = False
+        self._is_processing_gate = True
+        try:
+            print("\n--- [GATE OUT / CHECK-OUT] EXECUTE DUAL FACE + LP VERIFICATION ---")
 
-        if saved_emb is not None and exit_emb is not None:
-            sim_score = self.db.compare_embeddings(saved_emb, exit_emb)
-            face_match = sim_score >= config.FACE_MATCH_THRESHOLD
-        elif saved_emb is None:
-            face_match = True
-            sim_score = 1.0
+            t0 = time.time()
+            detected_plates = self.plate_engine.detect_and_read(gate_frame)
+            faces = self.face_engine.analyze(gate_frame)
+            dt = (time.time() - t0) * 1000.0
 
-        if face_match:
-            res = self.db.close_session(session_id, match_score=sim_score)
-            self.last_status_msg = f"CHECK-OUT OK: Plate {saved_plate} (Sim: {sim_score:.2f})"
-            self.last_status_color = (0, 255, 0)
-            self.barrier_status = "BARRIER: OPEN (CHECK-OUT)"
-            self.last_transaction_info = f"OUT: #{session_id} | {saved_plate} | {res['duration_minutes']}m | Sim: {sim_score:.2f}"
-            print(f"[SUCCESS] XAC THUC HOP LE! Xe ra bai. {self.last_status_msg}")
+            plate_str = "UNKNOWN"
+            for p in detected_plates:
+                if p["plate"] != "unknown":
+                    plate_str = p["plate"]
+                    break
 
-            # Clean up track mapping for this session
-            keys_to_remove = [k for k, v in self.track_session_map.items() if v["id"] == session_id]
-            for k in keys_to_remove:
-                del self.track_session_map[k]
-        else:
-            self.last_status_msg = f"CANH BAO: SAI KHUON MAT! Sim={sim_score:.2f} (< {config.FACE_MATCH_THRESHOLD})"
-            self.last_status_color = (0, 0, 255)
-            self.barrier_status = "BARRIER: LOCKED (ALERT)"
-            self.last_transaction_info = f"ALERT: #{session_id} Plate {saved_plate} | Face mismatch ({sim_score:.2f})"
-            print(f"[ALERT] {self.last_status_msg}")
+            primary_face = self.face_engine.choose_primary_face(faces)
+            exit_emb = None
+            if primary_face is not None:
+                exit_emb = self.face_engine.get_embedding(primary_face)
 
-        res_frame = gate_frame.copy()
-        self.plate_engine.draw_plates(res_frame, detected_plates)
-        self.face_engine.draw_faces(res_frame, faces)
-        self.last_gate_result_overlay = res_frame
+            session = None
+            if plate_str != "UNKNOWN":
+                session = self.db.find_active_by_plate(plate_str)
+
+            if session is None and exit_emb is not None:
+                print("[Info] Quet phien gui theo nhan dien khuon mat...")
+                session = self.db.find_best_face_active(exit_emb)
+
+            if session is None and not self.headless:
+                manual = input("Khong tim thay phien. Nhap bien so thu cong: ").strip().upper()
+                if manual:
+                    session = self.db.find_active_by_plate(manual)
+
+            if session is None:
+                self.last_status_msg = f"CHECK-OUT FAIL: Khong tim thay phien gui ({dt:.0f}ms)"
+                self.last_status_color = (0, 0, 255)
+                self.barrier_status = "BARRIER: LOCKED"
+                print(f"[ERROR] {self.last_status_msg}")
+                self.barrier_controller.close_exit_barrier()
+                return
+
+            session_id = session["id"]
+            saved_plate = session["plate"]
+            saved_emb = session.get("embedding", None)
+
+            sim_score = 0.0
+            face_match = False
+
+            if saved_emb is not None and exit_emb is not None:
+                sim_score = self.db.compare_embeddings(saved_emb, exit_emb)
+                face_match = sim_score >= config.FACE_MATCH_THRESHOLD
+            elif saved_emb is None:
+                face_match = True
+                sim_score = 1.0
+
+            if face_match:
+                res = self.db.close_session(session_id, match_score=sim_score)
+                self.last_status_msg = f"CHECK-OUT OK: Plate {saved_plate} (Sim: {sim_score:.2f})"
+                self.last_status_color = (0, 255, 0)
+                self.barrier_status = "BARRIER: OPEN (CHECK-OUT)"
+                self.last_transaction_info = f"OUT: #{session_id} | {saved_plate} | {res['duration_minutes']}m | Sim: {sim_score:.2f}"
+                print(f"[SUCCESS] XAC THUC HOP LE! Xe ra bai. {self.last_status_msg}")
+                self.barrier_controller.open_exit_barrier()
+
+                # Clean up track mapping for this session
+                keys_to_remove = [k for k, v in self.track_session_map.items() if v["id"] == session_id]
+                for k in keys_to_remove:
+                    del self.track_session_map[k]
+            else:
+                self.last_status_msg = f"CANH BAO: SAI KHUON MAT! Sim={sim_score:.2f} (< {config.FACE_MATCH_THRESHOLD})"
+                self.last_status_color = (0, 0, 255)
+                self.barrier_status = "BARRIER: LOCKED (ALERT)"
+                self.last_transaction_info = f"ALERT: #{session_id} Plate {saved_plate} | Face mismatch ({sim_score:.2f})"
+                print(f"[ALERT] {self.last_status_msg}")
+                self.barrier_controller.close_exit_barrier()
+
+            res_frame = gate_frame.copy()
+            self.plate_engine.draw_plates(res_frame, detected_plates)
+            self.face_engine.draw_faces(res_frame, faces)
+            self.last_gate_result_overlay = res_frame
+        finally:
+            self._is_processing_gate = False
 
     def handle_find_my_car(self, gate_frame: np.ndarray) -> None:
         """Scan driver face at gate camera and query which parking slot (A1..D3) their car is in."""
@@ -372,10 +410,10 @@ class DualCameraSmartParking:
         cv2.rectangle(display, (0, h - 30), (w, h), (15, 15, 15), -1)
         cv2.putText(
             display,
-            "[I]: Check-in | [O]: Check-out | [F]: Tim Xe qua Mat | [Q]: Thoat",
+            "[I]: In | [O]: Out | [1/E]: Mo Vao | [2/X]: Mo Ra | [C]: Dong | [Q]: Thoat",
             (12, h - 9),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.48,
+            0.44,
             (255, 255, 255),
             1,
             cv2.LINE_AA,
@@ -506,6 +544,7 @@ class DualCameraSmartParking:
 
                     recent_sessions = self.db.get_recent_sessions(limit=10)
 
+                    hw_status = self.barrier_controller.get_status()
                     web_state.update_telemetry(
                         fps=fps,
                         occupancy=self.current_occupancy,
@@ -517,16 +556,41 @@ class DualCameraSmartParking:
                         active_cars_count=self.db.active_count(),
                         pending_sessions_count=len(self.pending_sessions),
                         recent_sessions=recent_sessions,
+                        entry_barrier_status=hw_status["entry_barrier"],
+                        exit_barrier_status=hw_status["exit_barrier"],
+                        hardware_enabled=hw_status["hardware_enabled"],
                     )
 
-                    # Check for remote web triggers (Check-in, Check-out, Find Car)
-                    remote_action = web_state.pop_action()
-                    if remote_action == "checkin":
-                        self.handle_checkin(frame_gate)
-                    elif remote_action == "checkout":
-                        self.handle_checkout(frame_gate)
-                    elif remote_action == "find_car":
-                        self.handle_find_my_car(frame_gate)
+                # Process trigger action from hardware button or web dashboard
+                active_action = self.barrier_controller.pop_action()
+                if not active_action and self.enable_web:
+                    active_action = web_state.pop_action()
+
+                if active_action == "checkin":
+                    self.handle_checkin(frame_gate)
+                elif active_action == "checkout":
+                    self.handle_checkout(frame_gate)
+                elif active_action == "find_car":
+                    self.handle_find_my_car(frame_gate)
+                elif active_action == "open_entry_barrier":
+                    self.barrier_controller.open_entry_barrier()
+                    self.barrier_status = "BARRIER: ENTRY OPEN (MANUAL)"
+                elif active_action == "open_exit_barrier":
+                    self.barrier_controller.open_exit_barrier()
+                    self.barrier_status = "BARRIER: EXIT OPEN (MANUAL)"
+                elif active_action == "close_barriers":
+                    self.barrier_controller.close_all()
+                    self.barrier_status = "BARRIER: CLOSED"
+
+                # Auto sync barrier status with physical servo state when idle
+                if self.barrier_controller.entry_state == "OPEN" and self.barrier_controller.exit_state == "OPEN":
+                    self.barrier_status = "BARRIER: ALL OPEN"
+                elif self.barrier_controller.entry_state == "OPEN":
+                    self.barrier_status = "BARRIER: ENTRY OPEN"
+                elif self.barrier_controller.exit_state == "OPEN":
+                    self.barrier_status = "BARRIER: EXIT OPEN"
+                elif not (self.barrier_status.startswith("BARRIER: LOCKED") or self.barrier_status.startswith("BARRIER: OPEN")):
+                    self.barrier_status = "BARRIER: CLOSED"
 
                 # 5. Render GUI windows
                 key = -1
@@ -553,8 +617,20 @@ class DualCameraSmartParking:
                 if key in (ord("f"), ord("s"), ord("F"), ord("S")):
                     self.handle_find_my_car(frame_gate)
 
+                # Manual Barrier Controls
+                if key in (ord("1"), ord("e"), ord("E")):
+                    self.barrier_controller.open_entry_barrier()
+                    self.barrier_status = "BARRIER: ENTRY OPEN (MANUAL)"
+                elif key in (ord("2"),):
+                    self.barrier_controller.open_exit_barrier()
+                    self.barrier_status = "BARRIER: EXIT OPEN (MANUAL)"
+                elif key in (ord("c"), ord("C")):
+                    self.barrier_controller.close_all()
+                    self.barrier_status = "BARRIER: CLOSED"
 
         finally:
+            if hasattr(self, "barrier_controller") and self.barrier_controller:
+                self.barrier_controller.cleanup()
             self.cam_tracking.release()
             if self.cam_gate is not self.cam_tracking:
                 self.cam_gate.release()

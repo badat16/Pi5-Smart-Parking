@@ -269,17 +269,80 @@ body {
 .barrier-pill {
     padding: 5px 14px;
     border-radius: 20px;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     font-weight: 700;
     background: rgba(239, 68, 68, 0.2);
     color: var(--accent-red);
     border: 1px solid rgba(239, 68, 68, 0.4);
+    letter-spacing: 0.3px;
+    transition: all 0.2s ease;
 }
 
 .barrier-pill.open {
     background: rgba(16, 185, 129, 0.2);
     color: var(--accent-green);
     border-color: rgba(16, 185, 129, 0.4);
+}
+
+.barrier-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.hardware-info-bar {
+    display: flex;
+    gap: 16px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.hw-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.hw-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--accent-green);
+    box-shadow: 0 0 6px var(--accent-green);
+}
+
+.manual-barrier-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.btn-manual-barrier {
+    padding: 8px 8px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    background: rgba(30, 41, 59, 0.8);
+    color: var(--text-primary);
+    border: 1px solid var(--border-card);
+    box-shadow: none;
+}
+
+.btn-manual-barrier:hover {
+    background: rgba(51, 65, 85, 0.9);
+    border-color: var(--accent-blue);
+    transform: translateY(-1px);
+}
+
+.btn-close-both:hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: var(--accent-red);
 }
 
 .status-banner {

@@ -47,11 +47,47 @@ khi hệ thống chạy, Web Dashboard tự động mở tại cổng `5000`:
 - **Bo mạch**: Raspberry Pi 5 (bản 4GB hoặc 8GB RAM).
 - **Hệ điều hành**: Raspberry Pi OS 64-bit (Debian 12 Bookworm).
 - **Tản nhiệt**: Bắt buộc trang bị **Raspberry Pi Active Cooler** để đảm bảo CPU luôn mát mẻ và duy trì xung nhịp đỉnh 2.4GHz.
-- **Nguồn cấp**: Nguồn chuẩn Raspberry Pi 27W USB-C PD (5V/5A).
-- **Thẻ nhớ**: Thẻ MicroSD tốc độ cao (A2 / V30, dung lượng từ 32GB trở lên) hoặc ổ SSD qua Raspberry Pi M.2 HAT.
-- **Camera**:
-  - USB Webcam (chuẩn V4L2) cắm qua cổng USB 3.0.
-  - Hoặc Raspberry Pi Camera Module v2/v3 / HQ Camera (qua cáp ribbon CSI/libcamera).
+- **Phần cứng Barrier & Nút Nhấn**:
+  - 2x Động cơ Servo 9G SG90 (180°) cho cổng Vào và cổng Ra.
+  - 2x Nút nhấn cơ học (Push button NO/COM).
+  - Nguồn 5V ngoài (hoặc nguồn cấp riêng) cho Servo (nối chung mass GND với Pi).
+
+---
+
+## 🔌 Sơ Đồ Đấu Nối Chân Vật Lý (Raspberry Pi 5 Pinout)
+
+Hệ thống sử dụng trực tiếp các chân GPIO trên bo mạch Raspberry Pi 5 theo sơ đồ chuẩn:
+
+| Thiết bị | Dây / Chân linh kiện | Tên GPIO (BCM) | Số Chân Vật Lý Pi 5 | Mô tả chức năng |
+|---|---|---|---|---|
+| 🚧 **Servo Vào** | Tín hiệu (Dây Cam/Vàng) | **GPIO 5** | **Chân 29** | Mở/Đóng Barrier Xe Vào (0° - 90°) |
+| 🚧 **Servo Ra** | Tín hiệu (Dây Cam/Vàng) | **GPIO 6** | **Chân 31** | Mở/Đóng Barrier Xe Ra (0° - 90°) |
+| 🔘 **Nút Nhấn Vào** | Chân NO | **GPIO 23** | **Chân 16** | Ấn nút để quét khuôn mặt + biển số Check-in |
+| 🔘 **Nút Nhấn Ra** | Chân NO | **GPIO 24** | **Chân 18** | Ấn nút để quét khuôn mặt + đối soát Check-out |
+| ⏚ **GND Servo** | Dây Nâu / Đen | GND | **Chân 30 / 34** | Chân mass cho 2 Servo |
+| ⏚ **GND Nút Nhấn** | Chân COM của nút | GND | **Chân 14 / 20** | Kéo GPIO xuống GND khi ấn nút |
+| ⚡ **GND Chung Nguồn**| Dây Mass nguồn ngoài | GND | **Chân 39** | **Cực kỳ quan trọng**: Nối chung GND giữa Pi và Nguồn 5V của Servo |
+
+> [!TIP]
+> **Chống rung rè (Anti-jitter & Power-saving)**: Hệ thống tự động kích hoạt chế độ `detach PWM` sau khi servo quay xong góc mục tiêu (0.8s). Điều này ngăn ngừa hoàn toàn tình trạng servo SG90 bị rè, rung, nóng hoặc sụt áp bo mạch khi giữ vị trí.
+
+---
+
+## 🛠️ Công Cụ Kiểm Tra & Căn Chỉnh Phần Cứng Nhanh
+
+Trước khi chạy toàn bộ hệ thống AI, bạn có thể kiểm tra riêng 2 servo và 2 nút nhấn bằng công cụ tương tác:
+
+```bash
+# Kích hoạt venv (nếu có) và chạy công cụ test:
+python3 test_barrier_hardware.py
+```
+
+Menu hỗ trợ kiểm tra trực quan:
+- `[1]` Test Servo Vào (GPIO 5): Xoay mở 90° -> Giữ 3s -> Tự đóng 0°.
+- `[2]` Test Servo Ra (GPIO 6): Xoay mở 90° -> Giữ 3s -> Tự đóng 0°.
+- `[3]` Test Nút Nhấn (GPIO 23 & 24): Lắng nghe nút nhấn theo thời gian thực.
+- `[4]` Test Quy trình tự động: Ấn nút -> Mở barrier 5s -> Tự đóng.
+- `[5]` Căn chỉnh góc Servo: Nhập góc tùy ý (0° - 180°) để tìm vị trí thanh chắn đóng/mở chuẩn nhất cho cơ cấu của bạn.
 
 ---
 

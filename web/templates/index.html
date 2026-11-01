@@ -83,13 +83,28 @@
             <!-- Gate Control & Transaction Info Panel -->
             <section class="card control-section">
                 <div class="card-header">
-                    <h2>🚧 GATE CONTROL & GATE STATUS</h2>
-                    <span class="barrier-pill" id="barrier-status-pill">BARRIER: CLOSED</span>
+                    <h2>🚧 GATE CONTROL & HARDWARE BARRIER</h2>
+                    <div class="barrier-badges">
+                        <span class="barrier-pill" id="entry-barrier-pill">CỔNG VÀO (GPIO 5): CLOSED</span>
+                        <span class="barrier-pill" id="exit-barrier-pill">CỔNG RA (GPIO 6): CLOSED</span>
+                    </div>
                 </div>
 
                 <div class="status-banner" id="system-status-banner">
                     <div class="banner-title">Hệ thống sẵn sàng</div>
                     <div class="banner-sub" id="last-transaction-sub">Chưa có giao dịch mới</div>
+                </div>
+
+                <!-- Hardware Push Button Info Bar -->
+                <div class="hardware-info-bar">
+                    <div class="hw-item">
+                        <span class="hw-dot online"></span>
+                        <span class="hw-label">Nút Vào: <strong>GPIO 23</strong> (Chân 16)</span>
+                    </div>
+                    <div class="hw-item">
+                        <span class="hw-dot online"></span>
+                        <span class="hw-label">Nút Ra: <strong>GPIO 24</strong> (Chân 18)</span>
+                    </div>
                 </div>
 
                 <div class="action-buttons">
@@ -100,7 +115,19 @@
                         <span class="btn-icon">📤</span> CHECK-OUT (XE RA) [O]
                     </button>
                     <button class="btn btn-findcar" onclick="triggerAction('find_car')">
-                        <span class="btn-icon">🔍</span> TÌM XE QUÁ MẮT [F]
+                        <span class="btn-icon">🔍</span> TÌM XE QUA MẮT [F]
+                    </button>
+                </div>
+
+                <div class="manual-barrier-grid">
+                    <button class="btn btn-manual-barrier" onclick="triggerAction('open_entry_barrier')">
+                        <span>🚪</span> Mở Cổng Vào [1]
+                    </button>
+                    <button class="btn btn-manual-barrier" onclick="triggerAction('open_exit_barrier')">
+                        <span>🚪</span> Mở Cổng Ra [2]
+                    </button>
+                    <button class="btn btn-manual-barrier btn-close-both" onclick="triggerAction('close_barriers')">
+                        <span>🔒</span> Đóng Cả 2 [C]
                     </button>
                 </div>
 

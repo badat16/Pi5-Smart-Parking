@@ -108,13 +108,38 @@ async function fetchStatusInfo() {
         bannerEl.querySelector(".banner-sub").innerText = data.last_transaction || "Chưa có giao dịch";
         bannerEl.style.borderLeftColor = data.status_color_hex || "var(--accent-blue)";
 
-        // Barrier pill
+        // Barrier status update
         const barrierPill = document.getElementById("barrier-status-pill");
-        barrierPill.innerText = data.barrier_status || "BARRIER: CLOSED";
-        if (data.barrier_status && data.barrier_status.includes("OPEN")) {
-            barrierPill.classList.add("open");
-        } else {
-            barrierPill.classList.remove("open");
+        if (barrierPill) {
+            barrierPill.innerText = data.barrier_status || "BARRIER: CLOSED";
+            if (data.barrier_status && data.barrier_status.includes("OPEN")) {
+                barrierPill.classList.add("open");
+            } else {
+                barrierPill.classList.remove("open");
+            }
+        }
+
+        // Dual Hardware Barrier pills (Entry & Exit)
+        const entryPill = document.getElementById("entry-barrier-pill");
+        if (entryPill) {
+            const entryState = data.entry_barrier || "CLOSED";
+            entryPill.innerText = `CỔNG VÀO (GPIO 5): ${entryState}`;
+            if (entryState === "OPEN") {
+                entryPill.classList.add("open");
+            } else {
+                entryPill.classList.remove("open");
+            }
+        }
+
+        const exitPill = document.getElementById("exit-barrier-pill");
+        if (exitPill) {
+            const exitState = data.exit_barrier || "CLOSED";
+            exitPill.innerText = `CỔNG RA (GPIO 6): ${exitState}`;
+            if (exitState === "OPEN") {
+                exitPill.classList.add("open");
+            } else {
+                exitPill.classList.remove("open");
+            }
         }
     } catch (err) {
         console.warn("Status fetch error:", err);

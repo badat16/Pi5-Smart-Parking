@@ -18,6 +18,35 @@ PLATE_OCR_MODEL = MODELS_DIR / "LP_ocr_nano_62.pt"
 CAR_TRACKING_MODEL = MODELS_DIR / "best.pt"
 FACE_MODEL_NAME = "buffalo_sc"
 
+# =============================================================================
+# Hardware Barrier & Push Button Settings (Raspberry Pi 5 GPIO)
+# =============================================================================
+ENABLE_HARDWARE_BARRIER = True
+
+# GPIO Pin Configuration (Raspberry Pi 5 Pinout)
+SERVO_ENTRY_PIN = 5      # Physical Pin 29 (GPIO05) - Servo Vào (SG90 9G 180°)
+SERVO_EXIT_PIN = 6       # Physical Pin 31 (GPIO06) - Servo Ra (SG90 9G 180°)
+BUTTON_ENTRY_PIN = 23    # Physical Pin 16 (GPIO23) - Nút Nhấn Vào (NO -> Pin 16, COM -> Pin 14 GND)
+BUTTON_EXIT_PIN = 24     # Physical Pin 18 (GPIO24) - Nút Nhấn Ra (NO -> Pin 18, COM -> Pin 20 GND)
+
+# SG90 180° Servo Angles (0° - 180°)
+# 0°: Thanh barrier hạ ngang (Đóng cổng)
+# 90°: Thanh barrier nâng đứng (Mở cổng)
+BARRIER_ENTRY_CLOSED_ANGLE = 0
+BARRIER_ENTRY_OPEN_ANGLE = 90
+BARRIER_EXIT_CLOSED_ANGLE = 0
+BARRIER_EXIT_OPEN_ANGLE = 90
+
+# SG90 Pulse Widths (seconds)
+SERVO_MIN_PULSE_WIDTH = 0.0005   # 0.5ms (0°)
+SERVO_MAX_PULSE_WIDTH = 0.0024   # 2.4ms (180°)
+
+# Timing & Behavior (seconds)
+BARRIER_AUTO_CLOSE_DELAY = 5.0   # Tự động đóng barrier sau 5 giây khi vào/ra thành công
+BARRIER_MOVE_TIME = 0.8          # Thời gian đợi servo xoay xong trước khi ngắt PWM (chống rung rè)
+BUTTON_DEBOUNCE_TIME = 0.20      # Thời gian chống dội tiếp điểm nút nhấn (hardware debounce)
+BUTTON_COOLDOWN_TIME = 2.0       # Thời gian chờ tối thiểu giữa 2 lần nhấn nút (chống lặp lệnh)
+
 # Camera Settings
 # Set CAMERA_SOURCE to an integer (0, 1) for USB webcam, or a video path/RTSP string
 CAMERA_SOURCE = 2
