@@ -16,19 +16,78 @@ Phiên bản này được thiết kế và tối ưu riêng cho **Raspberry Pi 
 4. 🏗️ **Quản lý Cổng Tích Hợp (Smart Gate In/Out)**:
    - **Xe Vào (Check-in)**: Tự động ghi nhận biển số và chụp khuôn mặt tài xế -> Lưu phiên vào SQLite -> Mở barrier.
    - **Xe Ra (Check-out)**: Quét biển số ra -> Đối soát chéo với khuôn mặt tài xế lúc vào (Cosine Similarity). Nếu khớp: Cho phép ra và tính thời gian đỗ xe; nếu không khớp: Cảnh báo gian lận / biển số giả.
+5. 🌐 **Web Dashboard Trực Tiếp Trên Raspberry Pi 5**: Host web app (Flask + MJPEG Stream) thay thế hoàn toàn màn hình HDMI. Cho phép thiết bị trong cùng mạng LAN (laptop, điện thoại, tablet) theo dõi live camera, bản đồ 12 ô đỗ, CPU/RAM/Temp/FPS và điều khiển Check-in/out từ xa.
 
 ---
+
+## 🌐 Hướng Dẫn Truy Cập Web Dashboard Từ Trình Duyệt
+
+khi hệ thống chạy, Web Dashboard tự động mở tại cổng `5000`:
+
+1. **Tìm địa chỉ IP của Raspberry Pi 5 trong mạng LAN**:
+   ```bash
+   hostname -I
+   # Ví dụ đầu ra: 192.168.1.150
+   ```
+2. **Mở trình duyệt trên máy tính / điện thoại / tablet cùng mạng LAN**:
+   ```
+   http://192.168.1.150:5000
+   ```
+3. **Các tính năng trên Dashboard**:
+   - 📷 **Live Cameras**: Luồng MJPEG realtime từ Camera Tracking (Cam 0) và Camera Gate (Cam 1).
+   - 🅿️ **Parking Lot Map**: Bản đồ trực quan 4 Khu (A, B, C, D) & 12 ô đỗ (A1..D3) cập nhật màu xanh (trống) / đỏ (đang đỗ) theo thời gian thực.
+   - ⚡ **System Telemetry**: Theo dõi chỉ số phần cứng (CPU %, RAM %, Nhiệt độ CPU, AI FPS, trạng thái camera).
+   - 🔘 **Remote Controls**: Kích hoạt từ xa nút Check-in (Xe Vào), Check-out (Xe Ra), Quét mắt Tìm Xe.
+
+---
+
 
 ## ⚙️ Yêu cầu Phần cứng Khuyến nghị
 
 - **Bo mạch**: Raspberry Pi 5 (bản 4GB hoặc 8GB RAM).
 - **Hệ điều hành**: Raspberry Pi OS 64-bit (Debian 12 Bookworm).
 - **Tản nhiệt**: Bắt buộc trang bị **Raspberry Pi Active Cooler** để đảm bảo CPU luôn mát mẻ và duy trì xung nhịp đỉnh 2.4GHz.
-- **Nguồn cấp**: Nguồn chuẩn Raspberry Pi 27W USB-C PD (5V/5A).
-- **Thẻ nhớ**: Thẻ MicroSD tốc độ cao (A2 / V30, dung lượng từ 32GB trở lên) hoặc ổ SSD qua Raspberry Pi M.2 HAT.
-- **Camera**:
-  - USB Webcam (chuẩn V4L2) cắm qua cổng USB 3.0.
-  - Hoặc Raspberry Pi Camera Module v2/v3 / HQ Camera (qua cáp ribbon CSI/libcamera).
+- **Phần cứng Barrier & Nút Nhấn**:
+  - 2x Động cơ Servo 9G SG90 (180°) cho cổng Vào và cổng Ra.
+  - 2x Nút nhấn cơ học (Push button NO/COM).
+  - Nguồn 5V ngoài (hoặc nguồn cấp riêng) cho Servo (nối chung mass GND với Pi).
+
+---
+
+## 🔌 Sơ Đồ Đấu Nối Chân Vật Lý (Raspberry Pi 5 Pinout)
+
+Hệ thống sử dụng trực tiếp các chân GPIO trên bo mạch Raspberry Pi 5 theo sơ đồ chuẩn:
+
+| Thiết bị | Dây / Chân linh kiện | Tên GPIO (BCM) | Số Chân Vật Lý Pi 5 | Mô tả chức năng |
+|---|---|---|---|---|
+| 🚧 **Servo Vào** | Tín hiệu (Dây Cam/Vàng) | **GPIO 5** | **Chân 29** | Mở/Đóng Barrier Xe Vào (0° - 90°) |
+| 🚧 **Servo Ra** | Tín hiệu (Dây Cam/Vàng) | **GPIO 6** | **Chân 31** | Mở/Đóng Barrier Xe Ra (0° - 90°) |
+| 🔘 **Nút Nhấn Vào** | Chân NO | **GPIO 23** | **Chân 16** | Ấn nút để quét khuôn mặt + biển số Check-in |
+| 🔘 **Nút Nhấn Ra** | Chân NO | **GPIO 24** | **Chân 18** | Ấn nút để quét khuôn mặt + đối soát Check-out |
+| ⏚ **GND Servo** | Dây Nâu / Đen | GND | **Chân 30 / 34** | Chân mass cho 2 Servo |
+| ⏚ **GND Nút Nhấn** | Chân COM của nút | GND | **Chân 14 / 20** | Kéo GPIO xuống GND khi ấn nút |
+| ⚡ **GND Chung Nguồn**| Dây Mass nguồn ngoài | GND | **Chân 39** | **Cực kỳ quan trọng**: Nối chung GND giữa Pi và Nguồn 5V của Servo |
+
+> [!TIP]
+> **Chống rung rè (Anti-jitter & Power-saving)**: Hệ thống tự động kích hoạt chế độ `detach PWM` sau khi servo quay xong góc mục tiêu (0.8s). Điều này ngăn ngừa hoàn toàn tình trạng servo SG90 bị rè, rung, nóng hoặc sụt áp bo mạch khi giữ vị trí.
+
+---
+
+## 🛠️ Công Cụ Kiểm Tra & Căn Chỉnh Phần Cứng Nhanh
+
+Trước khi chạy toàn bộ hệ thống AI, bạn có thể kiểm tra riêng 2 servo và 2 nút nhấn bằng công cụ tương tác:
+
+```bash
+# Kích hoạt venv (nếu có) và chạy công cụ test:
+python3 test_barrier_hardware.py
+```
+
+Menu hỗ trợ kiểm tra trực quan:
+- `[1]` Test Servo Vào (GPIO 5): Xoay mở 90° -> Giữ 3s -> Tự đóng 0°.
+- `[2]` Test Servo Ra (GPIO 6): Xoay mở 90° -> Giữ 3s -> Tự đóng 0°.
+- `[3]` Test Nút Nhấn (GPIO 23 & 24): Lắng nghe nút nhấn theo thời gian thực.
+- `[4]` Test Quy trình tự động: Ấn nút -> Mở barrier 5s -> Tự đóng.
+- `[5]` Căn chỉnh góc Servo: Nhập góc tùy ý (0° - 180°) để tìm vị trí thanh chắn đóng/mở chuẩn nhất cho cơ cấu của bạn.
 
 ---
 
@@ -189,13 +248,22 @@ smart_parking_rpi5/
 │   ├── best.pt                    # Trọng số nhận diện xe (5.3MB)
 │   └── download_models.py         # Script tự động tải InsightFace buffalo_sc
 │
+├── web/                           # Phân hệ Web Dashboard (Flask + HTML5 + CSS + JS)
+│   ├── app.py                     # Flask server routes, MJPEG streaming & WebState
+│   ├── templates/
+│   │   └── index.html             # Giao diện Web Dashboard (Glassmorphism Dark Mode)
+│   └── static/
+│       ├── css/dashboard.css      # CSS styling & responsive layout
+│       └── js/dashboard.js        # JavaScript polling client & interactive controls
+│
 ├── yolov5/                        # Mã nguồn YOLOv5 inference engine cục bộ
 ├── test_images/                   # Ảnh mẫu để kiểm thử ALPR
-├── main_parking_system.py         # Ứng dụng chính: Cổng bãi đỗ xe thông minh (Vào/Ra)
+├── main_parking_system.py         # Ứng dụng chính: Cổng bãi đỗ xe thông minh (Vào/Ra + Web Server)
 ├── demo_face.py                   # Script test riêng nhận diện khuôn mặt
 ├── demo_plate.py                  # Script test riêng nhận diện biển số
 └── demo_tracking.py               # Script test riêng theo dõi xe
 ```
+
 
 ---
 

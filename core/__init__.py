@@ -6,5 +6,6 @@ from .face_engine import FaceEngine
 from .plate_engine import PlateEngine
 from .vehicle_tracker import VehicleTracker
 from .camera_stream import CameraStream
+from .barrier_controller import BarrierController
 
-__all__ = ["FaceEngine", "PlateEngine", "VehicleTracker", "CameraStream"]
+__all__ = ["FaceEngine", "PlateEngine", "VehicleTracker", "CameraStream", "BarrierController"]
